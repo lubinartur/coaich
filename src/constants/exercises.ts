@@ -84,6 +84,7 @@ export const EXERCISE_SEED: Exercise[] = [
     equipment: 'bodyweight',
     tier: 1,
     isCustom: false,
+    timedHold: true,
     note: 'Timed hold — log seconds held per set (not kg).',
   },
   { id: 'crunch', name: 'Crunch', muscleGroup: 'core', equipment: 'bodyweight', tier: 2, isCustom: false },
@@ -98,6 +99,7 @@ export const EXERCISE_SEED: Exercise[] = [
     equipment: 'bodyweight',
     tier: 2,
     isCustom: false,
+    timedHold: true,
     note: 'Timed hold — log seconds per side per set (not kg).',
   },
 ];

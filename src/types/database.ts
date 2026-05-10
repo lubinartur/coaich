@@ -50,6 +50,8 @@ export interface Exercise {
   equipment: 'barbell' | 'dumbbell' | 'machine' | 'cable' | 'bodyweight';
   tier: 1 | 2 | 3;
   isCustom: boolean;
+  /** When true, logged `reps` / targets are seconds (timed hold). */
+  timedHold?: boolean;
   /** Optional coaching cue (e.g. timed holds). */
   note?: string;
 }

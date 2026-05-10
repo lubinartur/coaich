@@ -45,7 +45,7 @@ export const db = new CoAIchDB();
 export async function seedExercisesIfEmpty(): Promise<void> {
   const n = await db.exercises.count();
   if (n === 0) {
-    await db.exercises.bulkAdd(EXERCISE_SEED);
+    await db.exercises.bulkPut(EXERCISE_SEED);
   }
 }
 

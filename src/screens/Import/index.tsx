@@ -305,12 +305,10 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
         setCount: parsed?.length ?? 0,
       };
     });
-    console.log(`[Import] ${context} row validation`, details);
     return details;
   };
 
   const handleSave = async () => {
-    console.log('[Import] handleSave called');
     setFeedback(null);
 
     const details = logRowValidation('handleSave');
@@ -339,7 +337,6 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
   };
 
   const handleAddAnother = async () => {
-    console.log('[Import] handleAddAnother called');
     setFeedback(null);
 
     const details = logRowValidation('handleAddAnother');

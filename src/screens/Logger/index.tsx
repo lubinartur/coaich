@@ -10,13 +10,13 @@ import {
   formatTargetLineForExercise,
   getLastPerformedSummary,
   getRecLastLayout,
-  isPlankExerciseName,
+  isTimedHoldExercise,
   parseRecommendLine,
   previewExerciseTarget,
   type ProgressionStatus,
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession, WorkoutType } from '@/types';
-import ExercisePicker from '@/screens/Logger/ExercisePicker';
+import ExercisePicker, { type ExercisePickerFilter } from '@/screens/Logger/ExercisePicker';
 
 type SetRow = {
   id: string;
@@ -32,6 +32,8 @@ type LoggerExercise = {
   muscleGroup: MuscleGroup;
   name: string;
   equipment: Exercise['equipment'];
+  /** Timed hold: reps field is seconds. */
+  timedHold: boolean;
   recommend: string;
   last: string;
   progressionStatus: ProgressionStatus;
@@ -65,6 +67,7 @@ function skeletonFromTemplate(template: readonly LoggerTemplateExercise[]): Logg
     muscleGroup: def.muscleGroup,
     name: def.name,
     equipment: def.equipment,
+    timedHold: isTimedHoldExercise(def.exerciseId, def.name, undefined),
     recommend: '',
     last: '—',
     progressionStatus: 'first_session',
@@ -79,10 +82,21 @@ async function buildLoggerExerciseRow(def: LoggerTemplateExercise): Promise<Logg
   const preview = await previewExerciseTarget(def.exerciseId, def.name, goal, pharma);
   const progressionStatus: ProgressionStatus = preview?.progressionStatus ?? 'first_session';
 
+  const meta = await db.exercises.get(canonicalExerciseId(def.exerciseId));
+  const timedHold = isTimedHoldExercise(def.exerciseId, def.name, meta?.timedHold);
+
   const target = await db.exerciseTargets.get(def.exerciseId);
   const last = await getLastPerformedSummary(def.exerciseId);
   const recommend = target
-    ? formatTargetLineForExercise(def.exerciseId, def.name, target.weight, target.reps, target.sets, def.equipment)
+    ? formatTargetLineForExercise(
+        def.exerciseId,
+        def.name,
+        target.weight,
+        target.reps,
+        target.sets,
+        def.equipment,
+        timedHold,
+      )
     : '';
   const sets =
     target && target.sets > 0
@@ -102,6 +116,7 @@ async function buildLoggerExerciseRow(def: LoggerTemplateExercise): Promise<Logg
     muscleGroup: def.muscleGroup,
     name: def.name,
     equipment: def.equipment,
+    timedHold,
     recommend,
     last: last ?? '—',
     progressionStatus,
@@ -114,6 +129,63 @@ async function buildLoggerExercisesFromTemplate(
 ): Promise<LoggerExercise[]> {
   if (template.length === 0) return [];
   return Promise.all(template.map((def) => buildLoggerExerciseRow(def)));
+}
+
+function muscleGroupToPickerFilter(mg: MuscleGroup): ExercisePickerFilter {
+  if (mg === 'legs' || mg === 'glutes') return 'legs_glutes';
+  return mg;
+}
+
+async function buildSwappedLoggerExercise(old: LoggerExercise, picked: Exercise): Promise<LoggerExercise> {
+  const profile = await getProfile();
+  const goal = profile?.goal ?? 'muscle';
+  const pharma = profile?.pharmacology ?? 'natural';
+  const preview = await previewExerciseTarget(picked.id, picked.name, goal, pharma);
+  const progressionStatus: ProgressionStatus = preview?.progressionStatus ?? 'first_session';
+  const timedHold = isTimedHoldExercise(picked.id, picked.name, picked.timedHold);
+  const target = await db.exerciseTargets.get(picked.id);
+  const last = await getLastPerformedSummary(picked.id);
+  const recommend = target
+    ? formatTargetLineForExercise(
+        picked.id,
+        picked.name,
+        target.weight,
+        target.reps,
+        target.sets,
+        picked.equipment,
+        timedHold,
+      )
+    : '';
+
+  let sets: SetRow[];
+  if (target && target.sets > 0) {
+    sets = Array.from({ length: target.sets }, () => ({
+      id: makeId(),
+      weight: picked.equipment === 'bodyweight' ? '0' : String(target.weight),
+      reps: String(target.reps),
+      completed: false,
+    }));
+  } else {
+    sets = old.sets.map((s) => ({
+      id: makeId(),
+      weight: picked.equipment === 'bodyweight' ? '0' : s.weight,
+      reps: s.reps,
+      completed: false,
+      isPR: false,
+    }));
+  }
+
+  return {
+    exerciseId: picked.id,
+    muscleGroup: picked.muscleGroup,
+    name: picked.name,
+    equipment: picked.equipment,
+    timedHold,
+    recommend,
+    last: last ?? '—',
+    progressionStatus,
+    sets,
+  };
 }
 
 function toWorkoutType(t: string): WorkoutType {
@@ -192,6 +264,8 @@ export default function LoggerScreen({
   const [seconds, setSeconds] = useState(0);
   const [exercises, setExercises] = useState<LoggerExercise[]>(() => skeletonFromTemplate(exerciseTemplate));
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [swapExIdx, setSwapExIdx] = useState<number | null>(null);
+  const [pickerInitialFilter, setPickerInitialFilter] = useState<ExercisePickerFilter | undefined>(undefined);
   const [removeConfirm, setRemoveConfirm] = useState<{ exIdx: number; name: string } | null>(null);
   const templateKey = exerciseTemplate.map((e) => e.exerciseId).join('|');
   const [restDurationSec, setRestDurationSec] = useState(90);
@@ -212,6 +286,8 @@ export default function LoggerScreen({
 
   useEffect(() => {
     if (openExercisePickerOnMount) {
+      setSwapExIdx(null);
+      setPickerInitialFilter(undefined);
       setPickerOpen(true);
     }
   }, [openExercisePickerOnMount]);
@@ -280,12 +356,17 @@ export default function LoggerScreen({
       const ex = prev[exIdx];
       if (!ex) return prev;
       const set = ex.sets[setIdx];
-      if (!set?.completed) {
+      if (!set) return prev;
+
+      if (!set.completed) {
+        if (set.isPR !== true) return prev;
         return prev.map((row, i) =>
           i === exIdx ? { ...row, sets: row.sets.map((s, j) => (j === setIdx ? { ...s, isPR: false } : s)) } : row,
         );
       }
+
       const isPR = isSetPersonalRecord(sessions, prev, exIdx, setIdx);
+      if (Boolean(set.isPR) === isPR) return prev;
       return prev.map((row, i) =>
         i === exIdx ? { ...row, sets: row.sets.map((s, j) => (j === setIdx ? { ...s, isPR } : s)) } : row,
       );
@@ -294,9 +375,8 @@ export default function LoggerScreen({
 
   const toggleSetComplete = useCallback(
     (exIdx: number, setIdx: number) => {
-      let willComplete = false;
+      const willComplete = !exercises[exIdx]?.sets[setIdx]?.completed;
       setExercises((prev) => {
-        willComplete = !prev[exIdx].sets[setIdx].completed;
         const next = prev.map((ex) => ({ ...ex, sets: ex.sets.map((s) => ({ ...s })) }));
         const row = next[exIdx].sets[setIdx];
         row.completed = willComplete;
@@ -308,7 +388,7 @@ export default function LoggerScreen({
         void runPrCheck(exIdx, setIdx);
       }
     },
-    [runPrCheck, startRestTimer],
+    [exercises, runPrCheck, startRestTimer],
   );
 
   function updateSet(
@@ -362,6 +442,41 @@ export default function LoggerScreen({
     setExercises((prev) => [...prev, row]);
   };
 
+  const closePicker = () => {
+    setPickerOpen(false);
+    setSwapExIdx(null);
+    setPickerInitialFilter(undefined);
+  };
+
+  const handlePickerPick = (ex: Exercise) => {
+    const swapIdx = swapExIdx;
+    if (swapIdx !== null) {
+      setExercises((prev) => {
+        const oldRow = prev[swapIdx];
+        if (!oldRow) return prev;
+        void buildSwappedLoggerExercise(oldRow, ex).then((row) => {
+          setExercises((p) => (p[swapIdx] ? p.map((e, i) => (i === swapIdx ? row : e)) : p));
+        });
+        return prev;
+      });
+      closePicker();
+      return;
+    }
+    void appendExerciseFromLibrary(ex);
+  };
+
+  const openPickerForAdd = () => {
+    setSwapExIdx(null);
+    setPickerInitialFilter(undefined);
+    setPickerOpen(true);
+  };
+
+  const openPickerForSwap = (exIdx: number, muscleGroup: MuscleGroup) => {
+    setSwapExIdx(exIdx);
+    setPickerInitialFilter(muscleGroupToPickerFilter(muscleGroup));
+    setPickerOpen(true);
+  };
+
   const handleFinish = async () => {
     if (exercises.length === 0) return;
     const id = crypto.randomUUID();
@@ -391,8 +506,9 @@ export default function LoggerScreen({
     <div className="flex min-h-screen w-full flex-col bg-bg">
       <ExercisePicker
         open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onPick={(ex) => void appendExerciseFromLibrary(ex)}
+        onClose={closePicker}
+        onPick={handlePickerPick}
+        initialFilter={pickerInitialFilter}
       />
 
       {removeConfirm ? (
@@ -466,7 +582,7 @@ export default function LoggerScreen({
               ex.progressionStatus,
             );
             const isBw = ex.equipment === 'bodyweight';
-            const isPlank = isPlankExerciseName(ex.name);
+            const isTimed = ex.timedHold;
             return (
             <Card key={`${ex.exerciseId}-${exIdx}`} className="border-border">
               <div className="flex items-start justify-between gap-2">
@@ -526,12 +642,18 @@ export default function LoggerScreen({
                       type="text"
                       inputMode="numeric"
                       autoComplete="off"
-                      placeholder={isPlank ? 'sec' : 'reps'}
+                      placeholder={isTimed ? 's' : 'reps'}
+                      aria-label={isTimed ? 'Seconds' : 'Reps'}
                       className={`${inputClass} ${isBw ? 'flex-1' : ''}`}
                       value={set.reps}
                       onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
                       onFocus={(e) => e.currentTarget.select()}
                     />
+                    {isTimed ? (
+                      <span className="shrink-0 text-xs font-medium text-text-secondary" aria-hidden>
+                        s
+                      </span>
+                    ) : null}
                     {set.isPR ? (
                       <span
                         key={`pr-${set.id}-on`}
@@ -571,6 +693,7 @@ export default function LoggerScreen({
                 <button
                   type="button"
                   className="text-center text-xs text-text-secondary/50 underline-offset-2 hover:text-text-secondary hover:underline"
+                  onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
                 >
                   swap exercise
                 </button>
@@ -611,7 +734,7 @@ export default function LoggerScreen({
 
       <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex justify-center border-t border-border bg-bg/95 backdrop-blur-md">
         <div className="pointer-events-auto flex w-full max-w-[390px] items-stretch gap-3 px-5 py-4">
-          <Button type="button" variant="dark" size="md" className="min-w-0 flex-1" onClick={() => setPickerOpen(true)}>
+          <Button type="button" variant="dark" size="md" className="min-w-0 flex-1" onClick={openPickerForAdd}>
             <Plus className="h-4 w-4 shrink-0" aria-hidden />
             + Add Exercise
           </Button>

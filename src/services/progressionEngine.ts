@@ -135,6 +135,26 @@ function formatWeightForDisplay(w: number): string {
   return Number.isInteger(r) ? String(r) : r.toFixed(1).replace(/\.0$/, '');
 }
 
+/** Round load to nearest valid plate/stack step for the given increment (kg). */
+export const roundToIncrement = (weight: number, increment: number): number => {
+  return Math.round(weight / increment) * increment;
+};
+
+async function roundWeightByExerciseEquipment(exerciseId: string, weight: number): Promise<number> {
+  const inc = await resolveWeightIncrementKg(exerciseId);
+  return roundToIncrement(weight, inc);
+}
+
+async function withRoundedWeight(
+  exerciseId: string,
+  t: { weight: number; reps: number; sets: number },
+): Promise<{ weight: number; reps: number; sets: number }> {
+  return {
+    ...t,
+    weight: await roundWeightByExerciseEquipment(exerciseId, t.weight),
+  };
+}
+
 /** UI line e.g. `70kg × 10 × 3` */
 export function formatTargetLine(weight: number, reps: number, sets: number): string {
   return `${formatWeightForDisplay(weight)}kg × ${reps} × ${sets}`;
@@ -142,6 +162,29 @@ export function formatTargetLine(weight: number, reps: number, sets: number): st
 
 export function isPlankExerciseName(name: string): boolean {
   return name.toLowerCase().includes('plank');
+}
+
+/** True when sets use seconds (timed hold), from seed/meta or legacy name match. */
+export function isTimedHoldExercise(exerciseId: string, exerciseName: string, timedHold?: boolean): boolean {
+  if (timedHold === true) return true;
+  const id = canonicalExerciseId(exerciseId);
+  if (id === 'plank' || id === 'side-plank') return true;
+  return isPlankExerciseName(exerciseName);
+}
+
+/** Review / coach copy: next target line with reps or seconds. */
+export function formatNextTargetLine(
+  exerciseId: string,
+  exerciseName: string,
+  weight: number,
+  reps: number,
+  sets: number,
+  timedHold?: boolean,
+): string {
+  if (isTimedHoldExercise(exerciseId, exerciseName, timedHold)) {
+    return `${formatWeightForDisplay(weight)}kg × ${reps}s × ${sets} sets`;
+  }
+  return `${formatWeightForDisplay(weight)}kg × ${reps} reps × ${sets} sets`;
 }
 
 /** Display line for targets / last performance (bodyweight + timed plank). */
@@ -152,15 +195,16 @@ export function formatTargetLineForExercise(
   reps: number,
   sets: number,
   equipment?: Exercise['equipment'],
+  timedHold?: boolean,
 ): string {
   void exerciseId;
-  const plank = isPlankExerciseName(exerciseName);
+  const timed = isTimedHoldExercise(exerciseId, exerciseName, timedHold);
   if (equipment === 'bodyweight') {
-    if (plank) return `${reps} sec × ${sets}`;
+    if (timed) return `${reps}s × ${sets}`;
     return `Bodyweight · ${reps} × ${sets}`;
   }
-  if (weight <= 0 && plank) {
-    return `${reps} sec × ${sets}`;
+  if (weight <= 0 && timed) {
+    return `${reps}s × ${sets}`;
   }
   return formatTargetLine(weight, reps, sets);
 }
@@ -194,6 +238,12 @@ export function parseRecommendLine(recommend: string): { weight: string; reps: s
     if (!Number.isFinite(sets) || sets < 1) return null;
     return { weight: '0', reps: String(sec[1]), sets: Math.min(20, sets) };
   }
+  const secShort = compact.match(/^(\d+)sx(\d+)$/);
+  if (secShort) {
+    const sets = parseInt(secShort[2], 10);
+    if (!Number.isFinite(sets) || sets < 1) return null;
+    return { weight: '0', reps: String(secShort[1]), sets: Math.min(20, sets) };
+  }
   const bw = compact.match(/^bodyweight(\d+)x(\d+)$/);
   if (bw) {
     const sets = parseInt(bw[2], 10);
@@ -207,6 +257,14 @@ function repRangeForGoal(goal: Profile['goal']): { min: number; max: number } {
   const g = goal in REP_RANGES ? goal : 'muscle';
   return REP_RANGES[g as keyof typeof REP_RANGES];
 }
+
+/** Goal-based hold-time ceiling (seconds) for timed exercises; at/above → +10s step vs +5s. */
+const TIME_HOLD_RANGE: Record<Profile['goal'], { min: number; max: number }> = {
+  strength: { min: 20, max: 45 },
+  muscle: { min: 30, max: 90 },
+  weight_loss: { min: 30, max: 60 },
+  health: { min: 20, max: 60 },
+};
 
 /** Old Logger ids → canonical `EXERCISE_SEED` ids (history lookup / saves). */
 const LEGACY_EXERCISE_ID_TO_CANONICAL: Record<string, string> = {
@@ -243,19 +301,14 @@ function workingPctFromExperience(exp: Profile['experience']): number {
   }
 }
 
-function roundToNearest2Dot5Kg(w: number): number {
-  if (!Number.isFinite(w) || w < 0) return 0;
-  return Math.round(w / 2.5) * 2.5;
-}
-
 /**
  * First-day targets from onboarding 10RM benchmarks (bench / squat / deadlift).
- * Uses e1RM = estimate1RM(anchor10, 10), then experience % of 1RM; rounds to 2.5 kg.
+ * Uses e1RM = estimate1RM(anchor10, 10), then experience % of 1RM; rounds to equipment increment.
  */
-export function estimateBaselineFromCalibration(
+export async function estimateBaselineFromCalibration(
   exerciseId: string,
   profile: Profile,
-): { weight: number; reps: number; sets: number } | null {
+): Promise<{ weight: number; reps: number; sets: number } | null> {
   if (!profileHasCalibration(profile)) return null;
 
   const idEarly = canonicalExerciseId(exerciseId);
@@ -321,7 +374,9 @@ export function estimateBaselineFromCalibration(
 
   const e1rm = estimate1RM(anchor10, 10);
   const rawWorking = e1rm * workingPctFromExperience(profile.experience);
-  const weight = Math.max(2.5, roundToNearest2Dot5Kg(rawWorking));
+  const inc = await resolveWeightIncrementKg(id);
+  const rounded = roundToIncrement(rawWorking, inc);
+  const weight = Math.max(inc, rounded);
   const reps = repRangeForGoal(profile.goal).min;
   return { weight, reps, sets: 3 };
 }
@@ -522,7 +577,7 @@ function explainBlockProgression(
   prevAvgReps: number | null,
 ): { blocked: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  if (session.durationMinutes < 10) reasons.push(`durationMinutes=${session.durationMinutes}<10`);
+  if (session.durationMinutes < 15) reasons.push(`durationMinutes=${session.durationMinutes}<15`);
   if (hasFailedSets(ex)) reasons.push('hasFailedSets(incomplete set with logged weight/reps)');
   if (exerciseRatingIsBad(session, exerciseId)) reasons.push('exerciseRatingBad');
   const lastAvg = avgCompletedReps(ex);
@@ -533,12 +588,17 @@ function explainBlockProgression(
 }
 
 async function resolveWeightIncrementKg(exerciseId: string): Promise<number> {
-  const meta = await db.exercises.get(exerciseId);
+  const meta = await db.exercises.get(canonicalExerciseId(exerciseId));
   const eq = meta?.equipment;
   if (eq && eq in WEIGHT_INCREMENTS) {
     return WEIGHT_INCREMENTS[eq as keyof typeof WEIGHT_INCREMENTS];
   }
   return 2.5;
+}
+
+async function exerciseUsesTimedHold(exerciseId: string, exerciseName: string): Promise<boolean> {
+  const meta = await db.exercises.get(canonicalExerciseId(exerciseId));
+  return isTimedHoldExercise(exerciseId, exerciseName, meta?.timedHold);
 }
 
 async function persistTarget(exerciseId: string, pick: Pick<ExerciseTarget, 'weight' | 'reps' | 'sets'>) {
@@ -567,7 +627,8 @@ export async function getLastPerformedSummary(exerciseId: string): Promise<strin
     if (!sum) return null;
     const cid = canonicalExerciseId(exerciseId);
     const meta = await db.exercises.get(cid);
-    return formatTargetLineForExercise(cid, ex.exerciseName, sum.weight, sum.reps, sum.sets, meta?.equipment);
+    const w = await roundWeightByExerciseEquipment(cid, sum.weight);
+    return formatTargetLineForExercise(cid, ex.exerciseName, w, sum.reps, sum.sets, meta?.equipment, meta?.timedHold);
   } catch {
     return null;
   }
@@ -593,17 +654,19 @@ export async function getExerciseTarget(
   const persist = options?.persist !== false;
   const deloadWeek = options?.deloadWeek === true;
   try {
-    void exerciseName;
-
     if (deloadWeek) {
       const sessionsDw = await loadSessionsContainingExercise(exerciseId, 2);
       if (sessionsDw.length === 0) {
         const profileDw = await getProfile();
         if (!profileDw || !profileHasCalibration(profileDw)) return null;
-        const calDw = estimateBaselineFromCalibration(exerciseId, profileDw);
+        const calDw = await estimateBaselineFromCalibration(exerciseId, profileDw);
         if (!calDw) return null;
         const setsDw = Math.max(1, Math.ceil(calDw.sets / 2));
-        const nextDw = { weight: calDw.weight, reps: calDw.reps, sets: setsDw };
+        const nextDw = await withRoundedWeight(exerciseId, {
+          weight: calDw.weight,
+          reps: calDw.reps,
+          sets: setsDw,
+        });
         if (persist) await persistTarget(exerciseId, nextDw);
         return { ...nextDw, source: 'progression_engine', progressionStatus: 'deload' };
       }
@@ -613,33 +676,26 @@ export async function getExerciseTarget(
       const lastPerfDw = summarizeSessionExercise(lastExDw);
       if (!lastPerfDw) return null;
       const setsDeload = Math.max(1, Math.ceil(lastPerfDw.sets / 2));
-      const nextDeload = {
+      const nextDeload = await withRoundedWeight(exerciseId, {
         weight: lastPerfDw.weight,
         reps: lastPerfDw.reps,
         sets: setsDeload,
-      };
+      });
       if (persist) await persistTarget(exerciseId, nextDeload);
       return { ...nextDeload, source: 'progression_engine', progressionStatus: 'deload' };
     }
 
     const sessions = await loadSessionsContainingExercise(exerciseId, 2);
-    console.log('[progressionEngine] getExerciseTarget lookup', {
-      exerciseId,
-      sessionsFound: sessions.length,
-      exerciseIdsBySession: sessions.map((s) => ({
-        sessionId: s.id,
-        exerciseIds: s.exercises.map((e) => e.exerciseId),
-      })),
-    });
 
     if (sessions.length === 0) {
       const profile = await getProfile();
       if (!profile || !profileHasCalibration(profile)) return null;
-      const cal = estimateBaselineFromCalibration(exerciseId, profile);
+      const cal = await estimateBaselineFromCalibration(exerciseId, profile);
       if (!cal) return null;
-      if (persist) await persistTarget(exerciseId, cal);
+      const calRounded = await withRoundedWeight(exerciseId, cal);
+      if (persist) await persistTarget(exerciseId, calRounded);
       return {
-        ...cal,
+        ...calRounded,
         source: 'progression_engine',
         progressionStatus: 'baseline',
       };
@@ -653,102 +709,91 @@ export async function getExerciseTarget(
     if (!lastPerf) return null;
 
     if (sessions.length === 1) {
-      if (persist) await persistTarget(exerciseId, lastPerf);
-      return { ...lastPerf, source: 'progression_engine', progressionStatus: 'baseline' };
+      const baseline = await withRoundedWeight(exerciseId, lastPerf);
+      if (persist) await persistTarget(exerciseId, baseline);
+      return { ...baseline, source: 'progression_engine', progressionStatus: 'baseline' };
     }
 
     const prevSession = sessions[1];
     const gapDays = daysBetweenSessions(lastSession.finishedAt, prevSession.finishedAt);
     if (gapDays > 14) {
-      console.log(
-        `[progressionEngine] gap detected: ${gapDays} days since last session, returning baseline`,
-        {
-          exerciseId,
-          lastFinishedAt: lastSession.finishedAt,
-          previousFinishedAt: prevSession.finishedAt,
-        },
-      );
-      if (persist) await persistTarget(exerciseId, lastPerf);
-      return { ...lastPerf, source: 'progression_engine', progressionStatus: 'gap_detected' };
+      const gapPick = await withRoundedWeight(exerciseId, lastPerf);
+      if (persist) await persistTarget(exerciseId, gapPick);
+      return { ...gapPick, source: 'progression_engine', progressionStatus: 'gap_detected' };
     }
 
     const profile = await getProfile();
     const effectiveGoal = profile?.goal ?? goal;
-    const effectivePharmacology = profile?.pharmacology ?? pharmacology;
-    const range = repRangeForGoal(effectiveGoal);
-
     const prevEx = getSessionExercise(prevSession, exerciseId);
     const prevPerf = prevEx ? summarizeSessionExercise(prevEx) : null;
     const prevAvgReps =
       prevEx && prevPerf != null ? avgCompletedReps(prevEx) : null;
 
-    const lastRepsAnchor = lastPerf.reps;
-    const prevRepsAnchor = prevPerf?.reps ?? null;
+    const isTimed = await exerciseUsesTimedHold(exerciseId, exerciseName);
+    if (isTimed) {
+      const timeRange = TIME_HOLD_RANGE[effectiveGoal in TIME_HOLD_RANGE ? effectiveGoal : 'muscle'];
+
+      let nextTimed: { weight: number; reps: number; sets: number };
+      let progressionStatus: ProgressionStatus;
+
+      if (lastPerf.reps >= timeRange.max) {
+        nextTimed = {
+          weight: lastPerf.weight,
+          reps: lastPerf.reps + 10,
+          sets: lastPerf.sets,
+        };
+        progressionStatus = 'weight_increment';
+      } else {
+        const { blocked } = explainBlockProgression(lastSession, lastEx, exerciseId, prevAvgReps);
+        if (blocked) {
+          nextTimed = lastPerf;
+          progressionStatus = 'maintaining';
+          const rounded = await withRoundedWeight(exerciseId, nextTimed);
+          if (persist) await persistTarget(exerciseId, rounded);
+          return { ...rounded, source: 'progression_engine', progressionStatus };
+        }
+        nextTimed = {
+          weight: lastPerf.weight,
+          reps: lastPerf.reps + 5,
+          sets: lastPerf.sets,
+        };
+        progressionStatus = 'rep_increment';
+      }
+
+      const next = await withRoundedWeight(exerciseId, nextTimed);
+      if (persist) await persistTarget(exerciseId, next);
+      return { ...next, source: 'progression_engine', progressionStatus };
+    }
+
+    const range = repRangeForGoal(effectiveGoal);
 
     const inc = await resolveWeightIncrementKg(exerciseId);
-
-    console.log('[progressionEngine] getExerciseTarget 2+ sessions', {
-      exerciseId,
-      paramGoal: goal,
-      effectiveGoalFromDexie: effectiveGoal,
-      pharmacology: effectivePharmacology,
-      repRange: range,
-      lastSessionRepsMin: lastRepsAnchor,
-      previousSessionRepsMin: prevRepsAnchor,
-      lastSessionAvgReps: avgCompletedReps(lastEx),
-      previousSessionAvgReps: prevEx && prevPerf != null ? avgCompletedReps(prevEx) : null,
-      prevAvgRepsForGuard: prevAvgReps,
-      durationMinutes: lastSession.durationMinutes,
-      atOrAboveRepMax: lastPerf.reps >= range.max,
-    });
 
     let next: { weight: number; reps: number; sets: number };
 
     if (lastPerf.reps >= range.max) {
+      const rawW = lastPerf.weight + inc;
+      const w = await roundWeightByExerciseEquipment(exerciseId, rawW);
       next = {
-        weight: roundWeightKg(lastPerf.weight + inc),
+        weight: w,
         reps: range.min,
         sets: lastPerf.sets,
       };
-      console.log('[progressionEngine] progression decision: weight increment triggered', {
-        reason: 'lastReps >= repRange.max (guards not applied to weight progression)',
-        lastReps: lastPerf.reps,
-        repRangeMax: range.max,
-        repRangeMin: range.min,
-        pharmacology: effectivePharmacology,
-        lastWeight: lastPerf.weight,
-        incrementKg: inc,
-        next,
-      });
     } else {
-      const { blocked, reasons } = explainBlockProgression(lastSession, lastEx, exerciseId, prevAvgReps);
-      const blockReasonsFull = reasons.length ? reasons.join(' | ') : '';
-      console.log('[progressionEngine] rep-path guards', {
-        blocked,
-        blockReasons: reasons,
-        blockReasonsFull,
-      });
+      const { blocked } = explainBlockProgression(lastSession, lastEx, exerciseId, prevAvgReps);
 
       if (blocked) {
-        next = lastPerf;
+        next = await withRoundedWeight(exerciseId, lastPerf);
         const progressionStatus: ProgressionStatus = 'maintaining';
-        console.log('[progressionEngine] progression decision: blocking - maintaining', {
-          baseline: lastPerf,
-          next,
-          progressionStatus,
-        });
         if (persist) await persistTarget(exerciseId, next);
         return { ...next, source: 'progression_engine', progressionStatus };
       }
+      const wMaint = await roundWeightByExerciseEquipment(exerciseId, lastPerf.weight);
       next = {
-        weight: roundWeightKg(lastPerf.weight),
+        weight: wMaint,
         reps: lastPerf.reps + 1,
         sets: lastPerf.sets,
       };
-      console.log('[progressionEngine] progression decision: rep increment triggered', {
-        baseline: lastPerf,
-        next,
-      });
     }
 
     if (persist) await persistTarget(exerciseId, next);

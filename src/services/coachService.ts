@@ -2,6 +2,22 @@ import { checkDeloadNeeded, type DeloadCheckResult } from '@/services/progressio
 import { db } from '@/services/db';
 import type { MuscleGroup, Profile, WorkoutSession, WorkoutType } from '@/types';
 
+const COACH_CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
+const COACH_MAX_TOKENS = 1000;
+
+function viteEnv(key: string): string | undefined {
+  const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
+  return env[key];
+}
+
+export interface CoachPromptData {
+  profile: Profile;
+  lastSession: WorkoutSession | undefined;
+  hoursSinceLast: number;
+  recommendation: { type: string; name: string; reasoning: string };
+  weeklyVolume: Record<string, number>;
+}
+
 export type RecommendedWorkoutType = 'push' | 'pull' | 'legs' | 'full_body';
 
 export interface WorkoutRecommendation {
@@ -16,6 +32,46 @@ export interface WorkoutRecommendation {
   isDeload?: boolean;
   deloadConsecutiveWeeks?: number;
 }
+
+const buildCoachPrompt = (data: CoachPromptData): string => `
+
+You are a smart personal trainer explaining today's workout recommendation.
+
+Be brief — 2 sentences max. Natural tone, not robotic.
+
+---
+
+ATHLETE: ${data.profile.experience} level, goal: ${data.profile.goal}
+
+PHARMACOLOGY: ${data.profile.pharmacology}
+
+LAST WORKOUT: ${data.lastSession != null ? `${data.lastSession.name} — ${data.hoursSinceLast}h ago` : 'No completed workouts yet'}
+
+RECOMMENDED TODAY: ${data.recommendation.type} (${data.recommendation.name})
+
+REASON (technical): ${data.recommendation.reasoning}
+
+WEEKLY VOLUME STATUS:
+
+${Object.entries(data.weeklyVolume)
+  .map(([muscle, sets]) => `${muscle}: ${sets} sets`)
+  .join(', ')}
+
+---
+
+Write ONE short paragraph (2 sentences) explaining why this workout is recommended today.
+
+Mention recovery time or volume balance if relevant.
+
+Highlight the workout name in your response.
+
+Language: ${data.profile.language === 'ru' ? 'Russian' : 'English'}
+
+Respond with plain text only, no JSON.
+
+Do not use markdown formatting. No bold (**text**), no asterisks, plain text only.
+
+`;
 
 const WORKOUT_NAMES: Record<RecommendedWorkoutType, string> = {
   push: 'Push - Chest & Shoulders',
@@ -62,6 +118,100 @@ function startOfWeekMonday(now: Date): Date {
   d.setHours(0, 0, 0, 0);
   return d;
 }
+
+function countWeeklySetsByMuscleGroup(sessions: WorkoutSession[], now: Date): Record<string, number> {
+  const weekStart = startOfWeekMonday(now).toISOString();
+  const groups: MuscleGroup[] = [
+    'chest',
+    'back',
+    'shoulders',
+    'biceps',
+    'triceps',
+    'legs',
+    'glutes',
+    'core',
+  ];
+  const counts: Record<string, number> = {};
+  for (const g of groups) counts[g] = 0;
+  for (const s of sessions) {
+    if (s.finishedAt < weekStart) continue;
+    for (const ex of s.exercises) {
+      const mg = ex.muscleGroup;
+      for (const st of ex.sets) {
+        if (!st.completed) continue;
+        counts[mg] = (counts[mg] ?? 0) + 1;
+      }
+    }
+  }
+  return counts;
+}
+
+/**
+ * Build prompt inputs for {@link generateCoachMessage} (last session, hours since, weekly sets per muscle).
+ */
+export async function buildCoachPromptData(
+  profile: Profile,
+  recommendation: WorkoutRecommendation,
+): Promise<CoachPromptData> {
+  const now = new Date();
+  const weekStartIso = startOfWeekMonday(now).toISOString();
+  const weekSessions = await db.workoutSessions.where('finishedAt').aboveOrEqual(weekStartIso).toArray();
+  const lastFive = await db.workoutSessions.orderBy('finishedAt').reverse().limit(1).toArray();
+  const lastSession = lastFive[0];
+  const hoursSinceLast = lastSession ? hoursSince(lastSession.finishedAt, now) : Number.POSITIVE_INFINITY;
+  const weeklyVolume = countWeeklySetsByMuscleGroup(weekSessions, now);
+  return {
+    profile,
+    lastSession,
+    hoursSinceLast,
+    recommendation: {
+      type: recommendation.workoutType ?? 'rest',
+      name: recommendation.workoutName,
+      reasoning: recommendation.reasoning,
+    },
+    weeklyVolume,
+  };
+}
+
+export const generateCoachMessage = async (data: CoachPromptData): Promise<string> => {
+  const apiKey = viteEnv('VITE_ANTHROPIC_API_KEY');
+  const fallback = `Ready for your ${data.recommendation.type} session today.`;
+
+  if (!apiKey?.trim()) {
+    return fallback;
+  }
+
+  const prompt = buildCoachPrompt(data);
+
+  try {
+    const res = await fetch('/api/anthropic/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey.trim(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: COACH_CLAUDE_MODEL,
+        max_tokens: COACH_MAX_TOKENS,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    const rawJson = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return fallback;
+    }
+
+    const content = (rawJson as { content?: { type: string; text?: string }[] }).content;
+    const textBlock = content?.find((c) => c.type === 'text');
+    const text = textBlock?.text?.trim() ?? '';
+    return text.length > 0 ? text : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 function rotationFromLastSession(last: WorkoutSession | undefined, prev: WorkoutSession | undefined): RecommendedWorkoutType {
   if (!last) return 'push';

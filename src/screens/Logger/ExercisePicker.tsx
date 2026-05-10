@@ -33,9 +33,11 @@ export interface ExercisePickerProps {
   onClose: () => void;
   /** Called when user selects an exercise from the library. */
   onPick: (exercise: Exercise) => void;
+  /** When opening, pre-select this muscle filter (e.g. swap exercise). */
+  initialFilter?: ExercisePickerFilter;
 }
 
-export default function ExercisePicker({ open, onClose, onPick }: ExercisePickerProps) {
+export default function ExercisePicker({ open, onClose, onPick, initialFilter }: ExercisePickerProps) {
   const [list, setList] = useState<Exercise[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ExercisePickerFilter>('all');
@@ -57,8 +59,11 @@ export default function ExercisePicker({ open, onClose, onPick }: ExercisePicker
     if (!open) {
       setQuery('');
       setFilter('all');
+    } else {
+      setQuery('');
+      setFilter(initialFilter ?? 'all');
     }
-  }, [open]);
+  }, [open, initialFilter]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

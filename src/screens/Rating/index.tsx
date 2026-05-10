@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
-import { db } from '@/services/db';
-import type { ExerciseRating, WorkoutSession } from '@/types';
+import { db, getProfile } from '@/services/db';
+import { generateWorkoutReview } from '@/services/aiService';
+import { canonicalExerciseId, previewExerciseTarget } from '@/services/progressionEngine';
+import type { ExerciseRating, NextTarget, WorkoutSession } from '@/types';
 
 export type RatingExerciseItem = {
   exerciseId: string;
@@ -25,6 +27,7 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
   const [loading, setLoading] = useState(true);
   const [ratings, setRatings] = useState<Record<string, RowState>>({});
   const [expandedNote, setExpandedNote] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +76,7 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
   };
 
   const handleComplete = async () => {
-    if (!allRated || !session) return;
+    if (!allRated || !session || generating) return;
     const list: ExerciseRating[] = exercises.map((ex) => {
       const r = ratings[ex.exerciseId]!;
       const out: ExerciseRating = {
@@ -84,8 +87,59 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
       if (trimmed) out.note = trimmed;
       return out;
     });
-    await db.workoutSessions.update(sessionId, { ratings: list });
-    onComplete();
+    setGenerating(true);
+    try {
+      await db.workoutSessions.update(sessionId, { ratings: list });
+      const profile = await getProfile();
+      if (!profile) {
+        console.warn('Profile not found, skipping AI review');
+        onComplete();
+        return;
+      }
+      const nextTargets: NextTarget[] = [];
+      for (const ex of session.exercises) {
+        const id = canonicalExerciseId(ex.exerciseId);
+        const preview = await previewExerciseTarget(id, ex.exerciseName, profile.goal, profile.pharmacology);
+        if (!preview) continue;
+        nextTargets.push({
+          exerciseId: id,
+          exerciseName: ex.exerciseName,
+          weight: preview.weight,
+          reps: preview.reps,
+          sets: preview.sets,
+        });
+      }
+      const sessionForPrompt: WorkoutSession = { ...session, ratings: list };
+      const review = await generateWorkoutReview({
+        profile,
+        session: sessionForPrompt,
+        ratings: list,
+        nextTargets,
+      });
+      const id = crypto.randomUUID();
+      const generatedAt = new Date().toISOString();
+      await db.aiReviews.where('sessionId').equals(session.id).delete();
+      await db.aiReviews.add({
+        ...review,
+        id,
+        sessionId: session.id,
+        generatedAt,
+      });
+      for (const t of review.nextTargets) {
+        const exId = canonicalExerciseId(t.exerciseId);
+        await db.exerciseTargets.put({
+          exerciseId: exId,
+          weight: t.weight,
+          reps: t.reps,
+          sets: t.sets,
+          source: 'ai',
+          updatedAt: generatedAt,
+        });
+      }
+      onComplete();
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const ratingBtnBase =
@@ -212,10 +266,17 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
             variant="primary"
             size="lg"
             fullWidth
-            disabled={!allRated}
+            disabled={!allRated || generating}
             onClick={() => void handleComplete()}
           >
-            Get AI Review
+            {generating ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+                Generating…
+              </span>
+            ) : (
+              'Get AI Review'
+            )}
           </Button>
         </div>
       </div>

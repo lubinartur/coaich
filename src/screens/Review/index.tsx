@@ -3,8 +3,8 @@ import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
 import { db } from '@/services/db';
 import { formatPrLine } from '@/services/prDetection';
-import { canonicalExerciseId, formatTargetLineForExercise } from '@/services/progressionEngine';
-import type { PrRecord, WorkoutSession } from '@/types';
+import { formatNextTargetLine } from '@/services/progressionEngine';
+import type { AIReview, PrRecord, WorkoutSession } from '@/types';
 
 export interface ReviewScreenProps {
   /** When set, stats and exercise log are loaded from Dexie for this session. */
@@ -36,16 +36,6 @@ const STATS = [
   { label: 'DURATION', value: '1h 05m' },
 ] as const;
 
-const WENT_WELL = [
-  'Increased Barbell Row volume by 8%',
-  'Maintained strict form on Hammer Curls despite fatigue',
-] as const;
-
-const TO_IMPROVE = [
-  'Shortened rest periods on Bicep Curls (aim for 90s)',
-  'Slightly too heavy on Deadlift — watch lower back rounding',
-] as const;
-
 const LOG_EXERCISES = [
   {
     name: 'Lat Pulldown',
@@ -73,15 +63,6 @@ const LOG_EXERCISES = [
   },
 ] as const;
 
-const INTRO =
-  'Exceptional performance today. Your volume hit a new record for Pull day, and your explosive power on Lat Pulldowns indicates very high CNS recovery.';
-
-type NextTargetRow = {
-  key: string;
-  name: string;
-  line: string;
-};
-
 export default function ReviewScreen({
   sessionId,
   workoutName,
@@ -92,8 +73,9 @@ export default function ReviewScreen({
 }: ReviewScreenProps) {
   const [logOpen, setLogOpen] = useState(false);
   const [session, setSession] = useState<WorkoutSession | null>(null);
-  const [nextTargetRows, setNextTargetRows] = useState<NextTargetRow[]>([]);
   const [prRecords, setPrRecords] = useState<PrRecord[]>([]);
+  const [coachReview, setCoachReview] = useState<AIReview | null>(null);
+  const [coachLoading, setCoachLoading] = useState(() => Boolean(sessionId));
 
   useEffect(() => {
     if (!sessionId) {
@@ -128,48 +110,27 @@ export default function ReviewScreen({
   }, [sessionId, dataRefreshKey]);
 
   useEffect(() => {
-    if (!session) {
-      setNextTargetRows([]);
+    if (!sessionId) {
+      setCoachReview(null);
+      setCoachLoading(false);
       return;
     }
     let cancelled = false;
-    void (async () => {
-      const ai = session.aiReview;
-      if (ai?.nextTargets && ai.nextTargets.length > 0) {
-        const rows: NextTargetRow[] = [];
-        for (const t of ai.nextTargets) {
-          const id = canonicalExerciseId(t.exerciseId);
-          const meta = await db.exercises.get(id);
-          rows.push({
-            key: t.exerciseId,
-            name: t.exerciseName,
-            line: formatTargetLineForExercise(id, t.exerciseName, t.weight, t.reps, t.sets, meta?.equipment),
-          });
+    setCoachLoading(true);
+    void db.aiReviews
+      .where('sessionId')
+      .equals(sessionId)
+      .first()
+      .then((row) => {
+        if (!cancelled) {
+          setCoachReview(row ?? null);
+          setCoachLoading(false);
         }
-        if (!cancelled) setNextTargetRows(rows);
-        return;
-      }
-
-      const rows: NextTargetRow[] = [];
-      for (const ex of session.exercises) {
-        const id = canonicalExerciseId(ex.exerciseId);
-        const target = await db.exerciseTargets.get(id);
-        const meta = await db.exercises.get(id);
-        if (!target || target.sets < 1 || target.reps < 1 || !Number.isFinite(target.weight)) continue;
-        if (target.weight <= 0 && meta?.equipment !== 'bodyweight') continue;
-        rows.push({
-          key: id,
-          name: ex.exerciseName,
-          line: formatTargetLineForExercise(id, ex.exerciseName, target.weight, target.reps, target.sets, meta?.equipment),
-        });
-      }
-      if (!cancelled) setNextTargetRows(rows);
-    })();
-
+      });
     return () => {
       cancelled = true;
     };
-  }, [session, dataRefreshKey]);
+  }, [sessionId, dataRefreshKey]);
 
   const displayStats = useMemo(() => {
     if (!session) {
@@ -257,69 +218,93 @@ export default function ReviewScreen({
               </span>
               <p className="text-[10px] font-bold uppercase tracking-widest text-accent">COACH AI REPORT</p>
             </div>
-            <p className="mt-4 pl-3 pr-1 text-sm italic leading-relaxed text-text-primary/90">&ldquo;{INTRO}&rdquo;</p>
-
-            <div className="mt-6 space-y-6 pl-3 pr-1">
-              <div>
-                <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-success">
-                  <span aria-hidden>✓</span>
-                  WHAT WENT WELL
-                </h3>
-                <ul className="space-y-1.5 text-sm text-text-secondary">
-                  {WENT_WELL.map((line) => (
-                    <li key={line}>• {line}</li>
-                  ))}
-                </ul>
+            {sessionId && coachLoading ? (
+              <div className="mt-4 space-y-3 pl-3 pr-2" aria-busy>
+                <div className="h-4 w-full animate-pulse rounded bg-border" />
+                <div className="h-4 w-[80%] animate-pulse rounded bg-border" />
+                <div className="h-4 w-[60%] animate-pulse rounded bg-border" />
+                <div className="flex justify-center py-6">
+                  <div
+                    className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent"
+                    aria-hidden
+                  />
+                </div>
               </div>
+            ) : sessionId && !coachReview ? (
+              <p className="mt-4 pl-3 pr-1 text-sm text-text-secondary">No AI review for this workout.</p>
+            ) : coachReview ? (
+              <>
+                <p className="mt-4 pl-3 pr-1 text-sm italic leading-relaxed text-text-primary/90">
+                  &ldquo;{coachReview.intro}&rdquo;
+                </p>
 
-              <div>
-                <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-warning">
-                  <span aria-hidden>⚠</span>
-                  WHAT TO IMPROVE
-                </h3>
-                <ul className="space-y-1.5 text-sm text-text-secondary">
-                  {TO_IMPROVE.map((line) => (
-                    <li key={line}>• {line}</li>
-                  ))}
-                </ul>
-              </div>
+                <div className="mt-6 space-y-6 pl-3 pr-1">
+                  <div>
+                    <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-success">
+                      <span aria-hidden>✓</span>
+                      WHAT WENT WELL
+                    </h3>
+                    <ul className="space-y-1.5 text-sm text-success">
+                      {coachReview.wentWell.map((line, i) => (
+                        <li key={`${line}-${i}`} className="flex gap-2">
+                          <span aria-hidden>✓</span>
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
 
-              {nextTargetRows.length > 0 ? (
-                <div>
-                  <h3 className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-accent">
-                    <span aria-hidden>→</span>
-                    NEXT WORKOUT TARGETS
-                  </h3>
-                  <div className="space-y-2">
-                    {nextTargetRows.map((row) => (
-                      <div
-                        key={row.key}
-                        className="flex items-center justify-between gap-3 border-b border-border/30 py-2 text-xs last:border-0 last:pb-0"
-                      >
-                        <span className="font-medium text-text-primary">{row.name}</span>
-                        <span className="shrink-0 font-mono text-accent">{row.line}</span>
+                  <div>
+                    <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-warning">
+                      <span aria-hidden>⚠</span>
+                      WHAT TO IMPROVE
+                    </h3>
+                    <ul className="space-y-1.5 text-sm text-warning">
+                      {coachReview.toImprove.map((line, i) => (
+                        <li key={`${line}-${i}`} className="flex gap-2">
+                          <span aria-hidden>⚠</span>
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {coachReview.nextTargets.length > 0 ? (
+                    <div>
+                      <h3 className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-accent">
+                        <span aria-hidden>→</span>
+                        NEXT WORKOUT TARGETS
+                      </h3>
+                      <ul className="space-y-2 text-xs text-text-secondary">
+                        {coachReview.nextTargets.map((t, i) => (
+                          <li key={`${t.exerciseId}-${i}`} className="font-mono text-accent">
+                            {`${t.exerciseName}: ${formatNextTargetLine(t.exerciseId, t.exerciseName, t.weight, t.reps, t.sets)}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {coachReview.exerciseNotes.length > 0 ? (
+                    <div>
+                      <h3 className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-primary">
+                        EXERCISE NOTES
+                      </h3>
+                      <div className="space-y-4 text-sm italic leading-relaxed text-text-secondary">
+                        {coachReview.exerciseNotes.map((block, i) => (
+                          <p key={`${block.exerciseId}-${block.exerciseName}-${i}`}>
+                            <span className="font-semibold not-italic text-text-primary">{block.exerciseName}: </span>
+                            {block.note}
+                          </p>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-
-              {session?.aiReview?.exerciseNotes && session.aiReview.exerciseNotes.length > 0 ? (
-                <div>
-                  <h3 className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-primary">
-                    EXERCISE NOTES
-                  </h3>
-                  <div className="space-y-4 text-sm italic leading-relaxed text-text-secondary">
-                    {session.aiReview.exerciseNotes.map((block) => (
-                      <p key={`${block.exerciseId}-${block.exerciseName}`}>
-                        <span className="font-semibold not-italic text-text-primary">{block.exerciseName}: </span>
-                        {block.note}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
+              </>
+            ) : (
+              <p className="mt-4 pl-3 pr-1 text-sm text-text-secondary">No AI review for this workout.</p>
+            )}
           </Card>
 
           {sessionId && onEditWorkout ? (
