@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
 import { db } from '@/services/db';
+import { formatPrLine } from '@/services/prDetection';
 import { canonicalExerciseId, formatTargetLineForExercise } from '@/services/progressionEngine';
-import type { WorkoutSession } from '@/types';
+import type { PrRecord, WorkoutSession } from '@/types';
 
 export interface ReviewScreenProps {
   /** When set, stats and exercise log are loaded from Dexie for this session. */
@@ -92,6 +93,7 @@ export default function ReviewScreen({
   const [logOpen, setLogOpen] = useState(false);
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [nextTargetRows, setNextTargetRows] = useState<NextTargetRow[]>([]);
+  const [prRecords, setPrRecords] = useState<PrRecord[]>([]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -102,6 +104,24 @@ export default function ReviewScreen({
     void db.workoutSessions.get(sessionId).then((s) => {
       if (!cancelled) setSession(s ?? null);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, dataRefreshKey]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setPrRecords([]);
+      return;
+    }
+    let cancelled = false;
+    void db.prRecords
+      .where('sessionId')
+      .equals(sessionId)
+      .toArray()
+      .then((rows) => {
+        if (!cancelled) setPrRecords(rows.sort((a, b) => a.exerciseName.localeCompare(b.exerciseName)));
+      });
     return () => {
       cancelled = true;
     };
@@ -214,6 +234,20 @@ export default function ReviewScreen({
               </Card>
             ))}
           </div>
+
+          {prRecords.length > 0 ? (
+            <Card className="border border-border">
+              <h2 className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#F59E0B]">
+                <span aria-hidden>🏆</span>
+                Personal Records
+              </h2>
+              <ul className="space-y-2 text-sm leading-snug text-text-primary">
+                {prRecords.map((r) => (
+                  <li key={r.id ?? `${r.exerciseId}-${r.achievedAt}`}>{formatPrLine(r)}</li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
 
           {/* AI Coach report */}
           <Card className="border border-border border-l-4 border-l-accent pl-1">

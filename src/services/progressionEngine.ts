@@ -19,6 +19,18 @@ export type ProgressionEngineResult = {
   progressionStatus: ProgressionStatus;
 };
 
+/** Tailwind-friendly deload accent (Today / Logger rec lines). */
+const DELOAD_TEXT_CLASS = 'text-[#60A5FA]';
+const DELOAD_DOT_CLASS = 'bg-[#60A5FA]';
+
+export type DeloadCheckResult = {
+  deloadNeeded: boolean;
+  reason: string;
+  consecutiveWeeks: number;
+  /** True when deload was triggered by consecutive-week threshold (natural ≥4 or on-cycle ≥6). */
+  weekThresholdHit: boolean;
+};
+
 /** Copy + dot colors for Today / Logger (no row for `first_session`). */
 export function getProgressionStatusPresentation(
   status: ProgressionStatus,
@@ -55,8 +67,8 @@ export function getProgressionStatusPresentation(
     },
     deload: {
       text: 'Deload week — half volume',
-      textClass: 'text-accent',
-      dotClass: 'bg-accent',
+      textClass: DELOAD_TEXT_CLASS,
+      dotClass: DELOAD_DOT_CLASS,
     },
   };
   return map[status];
@@ -105,7 +117,7 @@ export function getRecLastLayout(rec: string, last: string, status: ProgressionS
     case 'first_session':
       return { kind: 'unified', label: 'START:', value, lineClass: 'text-text-secondary' };
     case 'deload':
-      return { kind: 'unified', label: 'DELOAD:', value, lineClass: 'text-accent' };
+      return { kind: 'unified', label: 'DELOAD:', value, lineClass: DELOAD_TEXT_CLASS };
     case 'rep_increment':
     case 'weight_increment':
       return { kind: 'unified', label: 'NEXT:', value, lineClass: 'text-accent' };
@@ -323,6 +335,100 @@ function sessionContainsExercise(session: WorkoutSession, exerciseId: string): b
   return session.exercises.some((e) => matchesExerciseLookup(e.exerciseId, exerciseId));
 }
 
+function startOfWeekMonday(d: Date): Date {
+  const x = new Date(d);
+  const day = x.getDay();
+  const diffFromMonday = day === 0 ? -6 : 1 - day;
+  x.setDate(x.getDate() + diffFromMonday);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function sessionInWeek(s: WorkoutSession, weekStart: Date): boolean {
+  const end = new Date(weekStart);
+  end.setDate(end.getDate() + 7);
+  const a = weekStart.toISOString();
+  const b = end.toISOString();
+  return s.finishedAt >= a && s.finishedAt < b;
+}
+
+/**
+ * Deload signals from recent history (last 6 weeks in Dexie + last 3 sessions for ratings).
+ */
+export async function checkDeloadNeeded(profile: Profile, now: Date = new Date()): Promise<DeloadCheckResult> {
+  const sixWeeksStart = new Date(now);
+  sixWeeksStart.setDate(sixWeeksStart.getDate() - 42);
+  sixWeeksStart.setHours(0, 0, 0, 0);
+  const windowSessions = await db.workoutSessions
+    .where('finishedAt')
+    .aboveOrEqual(sixWeeksStart.toISOString())
+    .toArray();
+
+  let consecutiveWeeks = 0;
+  let weekRule = false;
+  const weekThreshold = profile.pharmacology === 'on_cycle' ? 6 : 4;
+
+  if (windowSessions.length > 0) {
+    const sorted = [...windowSessions].sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
+    const anchorMonday = startOfWeekMonday(new Date(sorted[0].finishedAt));
+
+    for (let i = 0; i < 6; i++) {
+      const ws = new Date(anchorMonday);
+      ws.setDate(ws.getDate() - 7 * i);
+      const has = windowSessions.some((s) => sessionInWeek(s, ws));
+      if (has) consecutiveWeeks += 1;
+      else break;
+    }
+    weekRule = consecutiveWeeks >= weekThreshold;
+  }
+
+  const lastThree = await db.workoutSessions.orderBy('finishedAt').reverse().limit(3).toArray();
+  const badStreak =
+    lastThree.length === 3 &&
+    lastThree.every((s) => s.ratings.filter((r) => r.rating === 'bad').length >= 2);
+
+  const currentMonday = startOfWeekMonday(now);
+  const weekVolume = (offsetFromCurrentMonday: number) => {
+    const mon = new Date(currentMonday);
+    mon.setDate(mon.getDate() - 7 * offsetFromCurrentMonday);
+    const end = new Date(mon);
+    end.setDate(end.getDate() + 7);
+    return windowSessions
+      .filter((s) => s.finishedAt >= mon.toISOString() && s.finishedAt < end.toISOString())
+      .reduce((a, s) => a + (Number.isFinite(s.totalVolume) ? s.totalVolume : 0), 0);
+  };
+
+  let volumeDrop = false;
+  if (windowSessions.length > 0) {
+    const v1 = weekVolume(1);
+    const v2 = weekVolume(2);
+    const v3 = weekVolume(3);
+    volumeDrop =
+      v3 > 0 &&
+      v2 > 0 &&
+      v1 > 0 &&
+      v1 < v2 * 0.85 &&
+      v2 < v3 * 0.85;
+  }
+
+  const deloadNeeded = weekRule || badStreak || volumeDrop;
+  let reason = '';
+  if (deloadNeeded) {
+    if (weekRule) {
+      reason =
+        profile.pharmacology === 'on_cycle'
+          ? `${consecutiveWeeks} consecutive training weeks (on-cycle guideline).`
+          : `${consecutiveWeeks} consecutive training weeks without a break.`;
+    } else if (badStreak) {
+      reason = 'Last three workouts each had 2+ exercises rated rough — recovery may be lagging.';
+    } else {
+      reason = 'Weekly volume fell over 15% for two weeks in a row.';
+    }
+  }
+
+  return { deloadNeeded, reason, consecutiveWeeks, weekThresholdHit: weekRule };
+}
+
 /** Whole calendar days between the more recent `finishedAt` and the older one. */
 function daysBetweenSessions(newerFinishedAt: string, olderFinishedAt: string): number {
   const a = new Date(newerFinishedAt).getTime();
@@ -482,11 +588,39 @@ export async function getExerciseTarget(
   exerciseName: string,
   goal: Profile['goal'],
   pharmacology: Profile['pharmacology'],
-  options?: { persist?: boolean },
+  options?: { persist?: boolean; deloadWeek?: boolean },
 ): Promise<ProgressionEngineResult | null> {
   const persist = options?.persist !== false;
+  const deloadWeek = options?.deloadWeek === true;
   try {
     void exerciseName;
+
+    if (deloadWeek) {
+      const sessionsDw = await loadSessionsContainingExercise(exerciseId, 2);
+      if (sessionsDw.length === 0) {
+        const profileDw = await getProfile();
+        if (!profileDw || !profileHasCalibration(profileDw)) return null;
+        const calDw = estimateBaselineFromCalibration(exerciseId, profileDw);
+        if (!calDw) return null;
+        const setsDw = Math.max(1, Math.ceil(calDw.sets / 2));
+        const nextDw = { weight: calDw.weight, reps: calDw.reps, sets: setsDw };
+        if (persist) await persistTarget(exerciseId, nextDw);
+        return { ...nextDw, source: 'progression_engine', progressionStatus: 'deload' };
+      }
+      const lastSessionDw = sessionsDw[0];
+      const lastExDw = getSessionExercise(lastSessionDw, exerciseId);
+      if (!lastExDw) return null;
+      const lastPerfDw = summarizeSessionExercise(lastExDw);
+      if (!lastPerfDw) return null;
+      const setsDeload = Math.max(1, Math.ceil(lastPerfDw.sets / 2));
+      const nextDeload = {
+        weight: lastPerfDw.weight,
+        reps: lastPerfDw.reps,
+        sets: setsDeload,
+      };
+      if (persist) await persistTarget(exerciseId, nextDeload);
+      return { ...nextDeload, source: 'progression_engine', progressionStatus: 'deload' };
+    }
 
     const sessions = await loadSessionsContainingExercise(exerciseId, 2);
     console.log('[progressionEngine] getExerciseTarget lookup', {
@@ -597,8 +731,7 @@ export async function getExerciseTarget(
 
       if (blocked) {
         next = lastPerf;
-        const bad = exerciseRatingIsBad(lastSession, exerciseId);
-        const progressionStatus: ProgressionStatus = bad ? 'deload' : 'maintaining';
+        const progressionStatus: ProgressionStatus = 'maintaining';
         console.log('[progressionEngine] progression decision: blocking - maintaining', {
           baseline: lastPerf,
           next,
@@ -636,6 +769,10 @@ export async function previewExerciseTarget(
   exerciseName: string,
   goal: Profile['goal'],
   pharmacology: Profile['pharmacology'],
+  options?: { deloadWeek?: boolean },
 ): Promise<ProgressionEngineResult | null> {
-  return getExerciseTarget(exerciseId, exerciseName, goal, pharmacology, { persist: false });
+  return getExerciseTarget(exerciseId, exerciseName, goal, pharmacology, {
+    persist: false,
+    deloadWeek: options?.deloadWeek,
+  });
 }

@@ -29,3 +29,19 @@ body {
   scrollbar-width: none;
 }
 
+@keyframes pr-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-pr-pop {
+  animation: pr-pop 0.55s ease-out;
+}
+

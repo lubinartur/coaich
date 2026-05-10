@@ -1,3 +1,4 @@
+import { checkDeloadNeeded, type DeloadCheckResult } from '@/services/progressionEngine';
 import { db } from '@/services/db';
 import type { MuscleGroup, Profile, WorkoutSession, WorkoutType } from '@/types';
 
@@ -11,6 +12,9 @@ export interface WorkoutRecommendation {
   /** When `workoutType` is `null`, optional split to show if the user chooses “Train anyway”. */
   trainAnywayType?: RecommendedWorkoutType;
   trainAnywayName?: string;
+  /** Planned deload week: same split, reduced sets in progression engine. */
+  isDeload?: boolean;
+  deloadConsecutiveWeeks?: number;
 }
 
 const WORKOUT_NAMES: Record<RecommendedWorkoutType, string> = {
@@ -226,8 +230,18 @@ async function recommendActiveWorkout(
  * Coach recommendation: rotation from last session, recovery window, weekly volume balance.
  * Loads last 5 sessions (finishedAt desc) plus this week’s sessions for set counts.
  */
+function mergeDeloadReasoning(deload: DeloadCheckResult, activeReasoning: string): string {
+  const headline = deload.weekThresholdHit
+    ? deload.consecutiveWeeks === 1
+      ? "You've trained 1 week straight. Time for a deload."
+      : `You've trained ${deload.consecutiveWeeks} weeks straight. Time for a deload.`
+    : deload.reason;
+  return composeReasoning([headline, activeReasoning]);
+}
+
 export async function getWorkoutRecommendation(profile: Profile): Promise<WorkoutRecommendation> {
   const now = new Date();
+  const deload = await checkDeloadNeeded(profile, now);
 
   const lastFive = await db.workoutSessions.orderBy('finishedAt').reverse().limit(5).toArray();
   const last = lastFive[0];
@@ -242,8 +256,20 @@ export async function getWorkoutRecommendation(profile: Profile): Promise<Workou
       reasoning: 'You trained recently. Rest or do light activity today.',
       trainAnywayType: train.workoutType,
       trainAnywayName: train.workoutName,
+      isDeload: deload.deloadNeeded,
+      deloadConsecutiveWeeks: deload.consecutiveWeeks,
     };
   }
 
-  return recommendActiveWorkout(profile, now, last, prev);
+  const active = await recommendActiveWorkout(profile, now, last, prev);
+  if (!deload.deloadNeeded) {
+    return active;
+  }
+
+  return {
+    ...active,
+    reasoning: mergeDeloadReasoning(deload, active.reasoning),
+    isDeload: true,
+    deloadConsecutiveWeeks: deload.consecutiveWeeks,
+  };
 }

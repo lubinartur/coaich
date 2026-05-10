@@ -4,6 +4,7 @@ import { ProgressionStatusNote } from '@/components/ProgressionStatusNote';
 import { Button, Card } from '@/components/ui';
 import type { LoggerTemplateExercise } from '@/constants/workoutPrograms';
 import { db, getProfile } from '@/services/db';
+import { buildPrRecordsForSession, isSetPersonalRecord } from '@/services/prDetection';
 import {
   canonicalExerciseId,
   formatTargetLineForExercise,
@@ -22,6 +23,8 @@ type SetRow = {
   weight: string;
   reps: string;
   completed: boolean;
+  /** True when this completed set beats all prior Dexie history + other sets this workout. */
+  isPR?: boolean;
 };
 
 type LoggerExercise = {
@@ -271,6 +274,43 @@ export default function LoggerScreen({
     setRestRemaining(restDurationSec);
   }, [restDurationSec]);
 
+  const runPrCheck = useCallback(async (exIdx: number, setIdx: number) => {
+    const sessions = await db.workoutSessions.toArray();
+    setExercises((prev) => {
+      const ex = prev[exIdx];
+      if (!ex) return prev;
+      const set = ex.sets[setIdx];
+      if (!set?.completed) {
+        return prev.map((row, i) =>
+          i === exIdx ? { ...row, sets: row.sets.map((s, j) => (j === setIdx ? { ...s, isPR: false } : s)) } : row,
+        );
+      }
+      const isPR = isSetPersonalRecord(sessions, prev, exIdx, setIdx);
+      return prev.map((row, i) =>
+        i === exIdx ? { ...row, sets: row.sets.map((s, j) => (j === setIdx ? { ...s, isPR } : s)) } : row,
+      );
+    });
+  }, []);
+
+  const toggleSetComplete = useCallback(
+    (exIdx: number, setIdx: number) => {
+      let willComplete = false;
+      setExercises((prev) => {
+        willComplete = !prev[exIdx].sets[setIdx].completed;
+        const next = prev.map((ex) => ({ ...ex, sets: ex.sets.map((s) => ({ ...s })) }));
+        const row = next[exIdx].sets[setIdx];
+        row.completed = willComplete;
+        row.isPR = false;
+        return next;
+      });
+      if (willComplete) {
+        startRestTimer();
+        void runPrCheck(exIdx, setIdx);
+      }
+    },
+    [runPrCheck, startRestTimer],
+  );
+
   function updateSet(
     exIdx: number,
     setIdx: number,
@@ -282,8 +322,10 @@ export default function LoggerScreen({
       const row = next[exIdx].sets[setIdx];
       if (field === 'completed') {
         row.completed = value as boolean;
+        if (!value) row.isPR = false;
       } else {
         row[field] = value as string;
+        row.isPR = false;
       }
       return next;
     });
@@ -338,6 +380,10 @@ export default function LoggerScreen({
       ratings: [],
     };
     await db.workoutSessions.add(session);
+    const prRows = buildPrRecordsForSession(id, finishedAt, exercises);
+    if (prRows.length > 0) {
+      await db.prRecords.bulkAdd(prRows);
+    }
     onFinish(id);
   };
 
@@ -486,6 +532,16 @@ export default function LoggerScreen({
                       onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
                       onFocus={(e) => e.currentTarget.select()}
                     />
+                    {set.isPR ? (
+                      <span
+                        key={`pr-${set.id}-on`}
+                        className="animate-pr-pop flex shrink-0 items-center gap-0.5 rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#F59E0B]"
+                        title="Personal record"
+                      >
+                        <span aria-hidden>🏆</span>
+                        PR
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       aria-label={set.completed ? 'Uncomplete set' : 'Complete set'}
@@ -494,13 +550,7 @@ export default function LoggerScreen({
                           ? 'border-accent bg-accent text-white'
                           : 'border-border bg-surface text-text-secondary'
                       }`}
-                      onClick={() => {
-                        const willComplete = !set.completed;
-                        if (willComplete) {
-                          startRestTimer();
-                        }
-                        updateSet(exIdx, setIdx, 'completed', willComplete);
-                      }}
+                      onClick={() => toggleSetComplete(exIdx, setIdx)}
                     >
                       <Check className="h-5 w-5" strokeWidth={2.5} />
                     </button>

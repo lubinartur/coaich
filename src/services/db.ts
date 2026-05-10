@@ -3,6 +3,7 @@ import type {
   AIReview,
   Exercise,
   ExerciseTarget,
+  PrRecord,
   Profile,
   Program,
   WorkoutSession,
@@ -16,6 +17,7 @@ export class CoAIchDB extends Dexie {
   aiReviews!: Table<AIReview>;
   exerciseTargets!: Table<ExerciseTarget>;
   programs!: Table<Program>;
+  prRecords!: Table<PrRecord>;
 
   constructor() {
     super('coaich-db');
@@ -30,6 +32,9 @@ export class CoAIchDB extends Dexie {
     /** Index `finishedAt` for progression / ordering (was missing in v1). */
     this.version(2).stores({
       workoutSessions: 'id, type, startedAt, finishedAt',
+    });
+    this.version(3).stores({
+      prRecords: '++id, exerciseId, sessionId, achievedAt',
     });
   }
 }

@@ -17,6 +17,7 @@ import {
   getExerciseTarget,
   getLastPerformedSummary,
   getProgressionStatusInlineText,
+  getProgressionStatusPresentation,
   getRecLastLayout,
   type ProgressionStatus,
 } from '@/services/progressionEngine';
@@ -113,7 +114,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         const profile = await getProfile();
         if (cancelled) return;
 
-        const buildRowsForTemplate = async (p: Profile, templateKey: RecommendedWorkoutType) => {
+        const buildRowsForTemplate = async (
+          p: Profile,
+          templateKey: RecommendedWorkoutType,
+          deloadWeek: boolean,
+        ) => {
           const exercises = WORKOUT_PROGRAM_TEMPLATES[templateKey];
           return Promise.all(
             exercises.map(async (ex) => {
@@ -123,6 +128,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                   ex.name,
                   p.goal,
                   p.pharmacology,
+                  { deloadWeek },
                 );
                 const last = await getLastPerformedSummary(ex.exerciseId);
                 return {
@@ -173,7 +179,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         if (recommendation.workoutType === null) {
           setTrainAnywayRows([]);
           if (recommendation.trainAnywayType) {
-            const builtTrain = await buildRowsForTemplate(profile, recommendation.trainAnywayType);
+            const builtTrain = await buildRowsForTemplate(
+              profile,
+              recommendation.trainAnywayType,
+              recommendation.isDeload === true,
+            );
             if (!cancelled) setTrainAnywayRows(builtTrain);
           }
           if (!cancelled) {
@@ -184,7 +194,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           return;
         }
 
-        const built = await buildRowsForTemplate(profile, recommendation.workoutType);
+        const built = await buildRowsForTemplate(
+          profile,
+          recommendation.workoutType,
+          recommendation.isDeload === true,
+        );
 
         if (!cancelled) {
           setReco(recommendation);
@@ -307,13 +321,24 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         <Card className="relative border-border shadow-xl">
           <div className="mb-6 flex items-start justify-between gap-3">
             <div>
-              <Badge variant="accent">NEXT WORKOUT</Badge>
+              {reco?.isDeload ? (
+                <Badge
+                  variant="secondary"
+                  className="bg-[#60A5FA]/15 text-[#60A5FA]"
+                >
+                  DELOAD WEEK
+                </Badge>
+              ) : (
+                <Badge variant="accent">NEXT WORKOUT</Badge>
+              )}
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-text-primary">
                 {displayWorkoutType ? displayHeadline : '…'}
               </h2>
               <p className="mt-0.5 text-sm font-medium text-text-secondary">
                 {displayWorkoutType
-                  ? `${FOCUS_SUBTITLE[displayWorkoutType]} • ${WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType].length} exercises`
+                  ? reco?.isDeload
+                    ? '50% volume — same weights, half the sets'
+                    : `${FOCUS_SUBTITLE[displayWorkoutType]} • ${WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType].length} exercises`
                   : 'Loading…'}
               </p>
             </div>
@@ -329,6 +354,8 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
               displayRows.map((ex, i) => {
                 const layout = getRecLastLayout(ex.rec, ex.last, ex.progressionStatus);
                 const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
+                const statusPres = getProgressionStatusPresentation(ex.progressionStatus);
+                const statusClass = statusPres?.textClass ?? 'text-accent';
                 return (
                   <div
                     key={ex.exerciseId}
@@ -344,7 +371,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                         </p>
                         {statusInline ? (
                           <span
-                            className={`shrink-0 whitespace-nowrap pl-2 text-right text-xs font-medium leading-snug ${layout.lineClass}`}
+                            className={`shrink-0 whitespace-nowrap pl-2 text-right text-xs font-medium leading-snug ${statusClass}`}
                           >
                             {statusInline}
                           </span>
@@ -357,7 +384,9 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                             <span>REC:</span> {layout.rec}
                           </p>
                           {statusInline ? (
-                            <span className="shrink-0 whitespace-nowrap pl-2 text-right text-xs font-medium leading-snug text-accent">
+                            <span
+                              className={`shrink-0 whitespace-nowrap pl-2 text-right text-xs font-medium leading-snug ${statusClass}`}
+                            >
                               {statusInline}
                             </span>
                           ) : null}

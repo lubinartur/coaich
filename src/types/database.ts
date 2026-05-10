@@ -123,6 +123,18 @@ export interface ExerciseTarget {
   updatedAt: string;
 }
 
+/** Logged when the user hits a personal record on a finished workout set. */
+export interface PrRecord {
+  id?: number;
+  exerciseId: string;
+  exerciseName: string;
+  weight: number;
+  reps: number;
+  estimated1RM: number;
+  achievedAt: string;
+  sessionId: string;
+}
+
 export interface ProgramDay {
   dayName: string;
   type: WorkoutType;
