@@ -177,21 +177,21 @@ export const generateCoachMessage = async (data: CoachPromptData): Promise<strin
   const apiKey = viteEnv('VITE_ANTHROPIC_API_KEY');
   const fallback = `Ready for your ${data.recommendation.type} session today.`;
 
-  if (!apiKey?.trim()) {
-    return fallback;
-  }
-
   const prompt = buildCoachPrompt(data);
 
   try {
-    const res = await fetch('/api/anthropic/v1/messages', {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    };
+
+    if (apiKey?.trim()) {
+      headers['x-api-key'] = apiKey.trim();
+    }
+
+    const res = await fetch('/api/anthropic', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey.trim(),
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers,
       body: JSON.stringify({
         model: COACH_CLAUDE_MODEL,
         max_tokens: COACH_MAX_TOKENS,

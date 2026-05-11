@@ -276,30 +276,21 @@ export const generateWorkoutReview = async (data: ReviewPromptData): Promise<AIR
   const baseId = crypto.randomUUID();
   const generatedAt = new Date().toISOString();
 
-  if (!apiKey?.trim()) {
-    return {
-      id: baseId,
-      sessionId: data.session.id,
-      generatedAt,
-      intro: 'Missing VITE_ANTHROPIC_API_KEY. Add it to your .env file.',
-      wentWell: [],
-      toImprove: [],
-      nextTargets: [],
-      exerciseNotes: [],
-    };
-  }
-
   const prompt = buildReviewPrompt(data);
 
   try {
-    const res = await fetch('/api/anthropic/v1/messages', {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    };
+
+    if (apiKey?.trim()) {
+      headers['x-api-key'] = apiKey.trim();
+    }
+
+    const res = await fetch('/api/anthropic', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey.trim(),
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers,
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: CLAUDE_MAX_TOKENS,
