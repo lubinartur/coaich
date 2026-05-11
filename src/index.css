@@ -22,16 +22,22 @@
 @layer base {
   #root {
     min-height: 100vh;
+    min-height: 100dvh;
+    background-color: var(--color-bg);
   }
 
   html {
     min-height: 100vh;
+    min-height: 100dvh;
+    background-color: var(--color-bg);
   }
 
   body {
     @apply font-sans text-text-primary antialiased;
     min-height: 100vh;
+    min-height: 100dvh;
     margin: 0;
+    background-color: var(--color-bg);
     background: radial-gradient(ellipse at top, #1a0f2e 0%, #0a0a0a 60%);
     -webkit-font-smoothing: antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
