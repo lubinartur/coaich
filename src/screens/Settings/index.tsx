@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, X } from 'lucide-react';
-import { Button, Card } from '@/components/ui';
+import type { LucideIcon } from 'lucide-react';
+import { ChevronRight, Download, Globe, Shield, Sliders, User, X } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { db } from '@/services/db';
 import type { Profile } from '@/types';
 
@@ -104,35 +105,12 @@ function sheetTitle(id: NonNullable<SheetId>): string {
   return titles[id];
 }
 
-function SettingsRow({
-  label,
-  value,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  onPress: () => void;
-}) {
+function SectionLabel({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
   return (
-    <button
-      type="button"
-      onClick={onPress}
-      className="flex w-full items-center justify-between gap-3 border-b border-border/40 py-3.5 text-left last:border-0 active:bg-surface/50"
-    >
-      <span className="text-sm font-medium text-text-primary">{label}</span>
-      <div className="flex min-w-0 max-w-[55%] items-center justify-end gap-2">
-        <span className="truncate text-right text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          {value}
-        </span>
-        <ChevronRight className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
-      </div>
-    </button>
-  );
-}
-
-function SectionLabel({ children }: { children: string }) {
-  return (
-    <h2 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-widest text-text-secondary">{children}</h2>
+    <div className="mb-3 flex items-center gap-2 pl-2 text-[10px] font-bold uppercase tracking-widest text-[#6B7280]">
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      {children}
+    </div>
   );
 }
 
@@ -266,18 +244,18 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-12 pt-8">
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Settings</h1>
-        <p className="text-sm text-text-secondary">Loading…</p>
+      <div className="flex flex-col gap-6 bg-[#0A0A0A] px-6 pb-24 pt-10">
+        <h1 className="text-3xl font-bold text-white">Settings</h1>
+        <p className="text-sm text-[#6B7280]">Loading…</p>
       </div>
     );
   }
 
   if (!profile) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-12 pt-8">
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Settings</h1>
-        <p className="text-sm text-text-secondary">No profile found. Complete onboarding first.</p>
+      <div className="flex flex-col gap-6 bg-[#0A0A0A] px-6 pb-24 pt-10">
+        <h1 className="text-3xl font-bold text-white">Settings</h1>
+        <p className="text-sm text-[#6B7280]">No profile found. Complete onboarding first.</p>
       </div>
     );
   }
@@ -294,9 +272,9 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     }`;
 
   return (
-    <div className="flex flex-col gap-6 px-5 pb-12 pt-8">
+    <div className="animate-in fade-in flex flex-col gap-8 bg-[#0A0A0A] px-6 pb-24 pt-10 duration-500">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Settings</h1>
+        <h1 className="text-3xl font-bold text-white">Settings</h1>
       </header>
 
       {sheet ? (
@@ -487,90 +465,182 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
       ) : null}
 
       <section>
-        <SectionLabel>GENERAL</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Language" value={langLabel} onPress={() => void toggleLanguage()} />
+        <SectionLabel icon={Globe}>General</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <button
+            type="button"
+            onClick={() => void toggleLanguage()}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Language</span>
+            <span className="text-sm font-bold text-[#8B5CF6]">{langLabel}</span>
+          </button>
+          <div className="flex w-full items-center justify-between p-4">
+            <span className="text-sm text-white">Units</span>
+            <span className="text-sm font-bold text-[#8B5CF6]">METRIC (KG)</span>
           </div>
-        </Card>
+        </div>
       </section>
 
       <section>
-        <SectionLabel>PROFILE</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Gender" value={genderLabel} onPress={() => setSheet('gender')} />
-            <SettingsRow label="Age" value={String(profile.age)} onPress={() => setSheet('age')} />
-            <SettingsRow label="Weight" value={`${profile.weight} KG`} onPress={() => setSheet('weight')} />
-            <SettingsRow label="Height" value={`${profile.height} CM`} onPress={() => setSheet('height')} />
+        <SectionLabel icon={User}>Profile</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <div className="grid grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setSheet('gender')}
+              className="border-b border-r border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">GENDER</span>
+              <span className="text-sm font-bold text-white">{genderLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('age')}
+              className="border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">AGE</span>
+              <span className="text-sm font-bold text-white">{profile.age}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('weight')}
+              className="border-r border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">WEIGHT</span>
+              <span className="text-sm font-bold text-white">{profile.weight}kg</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('height')}
+              className="p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">HEIGHT</span>
+              <span className="text-sm font-bold text-white">{profile.height}cm</span>
+            </button>
           </div>
-        </Card>
+          <button
+            type="button"
+            onClick={() => setSheet('trainingEnvironment')}
+            className="flex w-full items-center justify-between border-t border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Training environment</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">
+                {formatTrainingEnvironment(profile.trainingEnvironment)}
+              </span>
+              <ChevronRight className="h-4 w-4 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('injuries')}
+            className="flex w-full items-center justify-between border-t border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Injuries</span>
+            <div className="flex items-center gap-2">
+              <span className="max-w-[55%] truncate text-right text-sm font-bold text-[#8B5CF6]">
+                {formatInjuries(profile.injuries)}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+        </div>
       </section>
 
       <section>
-        <SectionLabel>PREFERENCES</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Goal" value={formatGoal(profile.goal)} onPress={() => setSheet('goal')} />
-            <SettingsRow
-              label="Experience"
-              value={formatExperience(profile.experience)}
-              onPress={() => setSheet('experience')}
+        <SectionLabel icon={Sliders}>Preferences</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <button
+            type="button"
+            onClick={() => setSheet('goal')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Goal</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">{formatGoal(profile.goal)}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('experience')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Experience</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">{formatExperience(profile.experience)}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('restTimer')}
+            className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Rest Timer</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">{profile.restTimer}s</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel icon={Shield}>Advanced</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <button
+            type="button"
+            onClick={() => setSheet('pharmacology')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">Pharmacology</span>
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-sm font-bold ${
+                  profile.pharmacology === 'on_cycle' ? 'text-[#EF4444]' : 'text-[#22C55E]'
+                }`}
+              >
+                {pharmaLabel}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          {profile.pharmacology === 'on_cycle' && (
+            <div className="border-b border-[#2A2A2A] px-4 pb-4 pt-3">
+              {profile.cycleCompound ? (
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[#6B7280]">
+                  Compound{' '}
+                  <span className="font-semibold normal-case text-white">{profile.cycleCompound}</span>
+                </p>
+              ) : null}
+              {profile.cycleStartDate ? (
+                <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-[#6B7280]">
+                  Start date{' '}
+                  <span className="font-mono font-semibold normal-case text-white">{profile.cycleStartDate}</span>
+                </p>
+              ) : null}
+              {!profile.cycleCompound && !profile.cycleStartDate ? (
+                <p className="text-xs text-[#6B7280]">No cycle details saved.</p>
+              ) : null}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => onOpenImport?.()}
+            className="group flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3">
+              <Download className="h-4 w-4 text-[#6B7280]" aria-hidden />
+              <span className="text-sm text-white">Import Past Workouts</span>
+            </div>
+            <ChevronRight
+              className="h-[18px] w-[18px] text-[#2A2A2A] transition-colors group-hover:text-[#8B5CF6]"
+              aria-hidden
             />
-            <SettingsRow
-              label="Training Environment"
-              value={formatTrainingEnvironment(profile.trainingEnvironment)}
-              onPress={() => setSheet('trainingEnvironment')}
-            />
-            <SettingsRow label="Injuries" value={formatInjuries(profile.injuries)} onPress={() => setSheet('injuries')} />
-            <SettingsRow label="Rest Timer" value={`${profile.restTimer}S`} onPress={() => setSheet('restTimer')} />
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionLabel>DATA</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow
-              label="Import past workouts"
-              value="OPEN"
-              onPress={() => {
-                onOpenImport?.();
-              }}
-            />
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionLabel>ADVANCED</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Pharmacology" value={pharmaLabel} onPress={() => setSheet('pharmacology')} />
-            {profile.pharmacology === 'on_cycle' && (
-              <div className="border-t border-border/40 pb-4 pt-3">
-                {profile.cycleCompound ? (
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-text-secondary">
-                    Compound{' '}
-                    <span className="font-semibold normal-case text-text-primary">{profile.cycleCompound}</span>
-                  </p>
-                ) : null}
-                {profile.cycleStartDate ? (
-                  <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-text-secondary">
-                    Start date{' '}
-                    <span className="font-mono font-semibold normal-case text-text-primary">
-                      {profile.cycleStartDate}
-                    </span>
-                  </p>
-                ) : null}
-                {!profile.cycleCompound && !profile.cycleStartDate ? (
-                  <p className="text-xs text-text-secondary">No cycle details saved.</p>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </Card>
+          </button>
+        </div>
       </section>
     </div>
   );

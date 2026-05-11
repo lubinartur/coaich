@@ -11,6 +11,7 @@ import {
   summarizeSessionExercise,
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession } from '@/types';
+import { toDisplayName } from '@/utils/toDisplayName';
 import ExercisePicker from '@/screens/Logger/ExercisePicker';
 
 type SetRow = {
@@ -299,7 +300,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-bold leading-tight text-text-primary">Edit Workout</h2>
-            <p className="mt-0.5 text-xs text-text-secondary">{sessionName}</p>
+            <p className="mt-0.5 text-xs text-text-secondary">{toDisplayName(sessionName)}</p>
           </div>
         </div>
       </header>
@@ -311,7 +312,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
           return (
           <Card key={`${ex.exerciseId}-${exIdx}`} className="border-border">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="text-lg font-bold text-text-primary">{ex.name}</h3>
+              <h3 className="text-lg font-bold text-text-primary">{toDisplayName(ex.name)}</h3>
               <button
                 type="button"
                 onClick={() => removeExercise(exIdx)}

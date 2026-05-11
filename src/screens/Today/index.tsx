@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Dumbbell, Play, Zap } from 'lucide-react';
-import { Badge, Button, Card } from '@/components/ui';
+import { ArrowRight, Dumbbell, Sparkles, Zap } from 'lucide-react';
+import { motion } from 'motion/react';
 import {
   EMPTY_WORKOUT_TEMPLATE,
   WORKOUT_PROGRAM_TEMPLATES,
@@ -24,6 +24,8 @@ import {
   type ProgressionStatus,
 } from '@/services/progressionEngine';
 import type { Exercise, Profile } from '@/types';
+import { progressionStatusDisplayText } from '@/utils/progressionDisplayLabels';
+import { toDisplayName } from '@/utils/toDisplayName';
 
 const QUICK_PROGRAMS = [
   { name: 'Push', emoji: '🔥', program: 'push' as const },
@@ -49,6 +51,29 @@ const FOCUS_SUBTITLE: Record<RecommendedWorkoutType, string> = {
   full_body: 'Full body',
 };
 
+function operationLabel(type: RecommendedWorkoutType | null): string {
+  if (!type) return '…';
+  if (type === 'full_body') return 'FULL BODY';
+  return type.toUpperCase();
+}
+
+function missionDateSubtitle(): string {
+  return new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+
+/** Split coach copy on ". " so each sentence can be spaced; preserves final segment without forcing a period. */
+function splitCoachMessageIntoSentences(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  const parts = t.split('. ');
+  if (parts.length === 1) return [parts[0]];
+  return parts.map((p, i) => {
+    const s = p.trim();
+    if (i < parts.length - 1) return s.endsWith('.') ? s : `${s}.`;
+    return s;
+  });
+}
+
 export interface TodayScreenProps {
   onStartWorkout?: (payload: {
     workoutName: string;
@@ -65,7 +90,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [coachAiMessage, setCoachAiMessage] = useState<string | null>(null);
   const [coachAiLoading, setCoachAiLoading] = useState(false);
-  const [showExercises, setShowExercises] = useState(false);
+  const [coachMessageExpanded, setCoachMessageExpanded] = useState(false);
+
+  useEffect(() => {
+    setCoachMessageExpanded(false);
+  }, [coachAiMessage]);
 
   const startQuickProgram = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
     if (program === 'custom') {
@@ -268,217 +297,246 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
 
   const isRestRecommended = reco !== null && reco.workoutType === null;
 
-  const displayHeadline =
+  /** Short card title from recommendation (e.g. "Pull" from "Pull - Back & Biceps"), never goal labels. */
+  const workoutCardTitle =
     displayWorkoutName.length > 0
       ? (() => {
           const i = displayWorkoutName.indexOf(' - ');
-          return i === -1 ? displayWorkoutName : displayWorkoutName.slice(0, i);
+          const raw = i === -1 ? displayWorkoutName : displayWorkoutName.slice(0, i);
+          return toDisplayName(raw);
         })()
-      : '';
+      : displayWorkoutType
+        ? displayWorkoutType === 'full_body'
+          ? 'Full body'
+          : toDisplayName(displayWorkoutType)
+        : '';
+
+  const recHoldPillClass =
+    'text-[10px] font-black px-1.5 py-0.5 rounded-sm uppercase tracking-wide bg-[#8B5CF6]/25 text-[#8B5CF6] border border-[#8B5CF6]/35';
 
   return (
-    <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+    <motion.div
+      className="flex flex-col gap-10 px-5 pb-10 pt-8"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+    >
       {/* Header */}
-      <div className="mb-2 flex items-start justify-between gap-3">
+      <header className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">Today</h1>
-          <p className="mt-0.5 text-sm font-medium text-text-secondary">What to train today</p>
+          <h1 className="text-4xl font-black tracking-tighter text-white">Today</h1>
+          <p className="mt-1 text-sm font-medium tracking-tight text-[#6B7280]">
+            The mission for {missionDateSubtitle()}
+          </p>
         </div>
         <button
           type="button"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-accent/20 bg-accent/10 transition-transform active:scale-95"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 shadow-[0_0_24px_-4px_rgba(139,92,246,0.35)] transition-transform active:scale-95"
           aria-label="Refresh recommendation"
           onClick={() => setRefreshKey((k) => k + 1)}
         >
-          <Zap className="h-6 w-6 text-accent" aria-hidden />
+          <Zap className="h-6 w-6 text-[#8B5CF6]" fill="currentColor" aria-hidden />
         </button>
-      </div>
+      </header>
 
-      {/* Coach AI */}
-      <Card className="relative overflow-hidden border-border bg-card/30 backdrop-blur-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <span className="text-base text-accent" aria-hidden>
-            ✦
+      {/* Coach AI — glass accent */}
+      <section className="relative overflow-hidden rounded-3xl border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 p-6 backdrop-blur-md">
+        <div className="relative z-10 mb-3 flex items-center gap-2">
+          <div className="rounded-sm bg-[#8B5CF6] p-1">
+            <Sparkles className="h-2.5 w-2.5 text-white" fill="currentColor" strokeWidth={3} aria-hidden />
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8B5CF6]">
+            COAICH INTELLIGENCE
           </span>
-          <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary">Coach AI</h3>
         </div>
         {coachAiLoading ? (
-          <div className="space-y-2.5" aria-busy>
-            <div className="h-4 w-full animate-pulse rounded-md bg-border" />
-            <div className="h-4 w-[92%] animate-pulse rounded-md bg-border" />
-            <div className="h-4 w-[70%] animate-pulse rounded-md bg-border" />
+          <div className="relative z-10 space-y-2.5" aria-busy>
+            <div className="h-4 w-full animate-pulse rounded-md bg-[#2A2A2A]" />
+            <div className="h-4 w-[92%] animate-pulse rounded-md bg-[#2A2A2A]" />
+            <div className="h-4 w-[70%] animate-pulse rounded-md bg-[#2A2A2A]" />
           </div>
+        ) : coachAiMessage ? (
+          <>
+            <div className="relative z-10 space-y-4">
+              {(coachMessageExpanded
+                ? splitCoachMessageIntoSentences(coachAiMessage)
+                : splitCoachMessageIntoSentences(coachAiMessage).slice(0, 2)
+              ).map((sentence, i) => (
+                <p
+                  key={i}
+                  className="text-lg font-medium leading-relaxed tracking-tight text-white/90"
+                >
+                  {sentence}
+                </p>
+              ))}
+            </div>
+            {splitCoachMessageIntoSentences(coachAiMessage).length > 2 ? (
+              <button
+                type="button"
+                className="relative z-10 mt-3 text-sm font-medium text-[#8B5CF6] underline decoration-[#8B5CF6]/40 underline-offset-2 hover:opacity-90"
+                onClick={() => setCoachMessageExpanded((v) => !v)}
+              >
+                {coachMessageExpanded ? 'Read less' : 'Read more'}
+              </button>
+            ) : null}
+          </>
         ) : (
-          <p className="text-[15px] leading-relaxed text-text-primary/90">
-            {coachAiMessage ?? (loading ? 'Building your recommendation…' : '—')}
+          <p className="relative z-10 text-lg font-medium leading-tight tracking-tight text-white/90">
+            {loading ? 'Building your recommendation…' : '—'}
           </p>
         )}
-      </Card>
+        <div
+          className="pointer-events-none absolute -bottom-4 -right-4 h-24 w-24 rounded-full bg-[#8B5CF6]/20 blur-2xl transition-transform duration-1000 group-hover:scale-150"
+          aria-hidden
+        />
+      </section>
 
-      <Card className="relative border-border shadow-xl">
-        <div className="mb-6 flex items-start justify-between gap-3">
-          <div>
-            {reco?.isDeload ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {isRestRecommended ? (
-                  <Badge
-                    variant="secondary"
-                    className="border border-border/70 bg-surface/40 font-medium text-text-secondary"
-                  >
+      {/* Workout card — hardware shell */}
+      <section className="overflow-hidden rounded-[32px] border border-[#222222] bg-[#111111] p-1 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.8)]">
+        <div className="space-y-6 rounded-[31px] bg-[#181818] p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-2 rounded-md border border-[#333333] bg-[#222222] px-2 py-1">
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8B5CF6]" />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                    Operation: {operationLabel(displayWorkoutType)}
+                  </span>
+                </div>
+                {reco?.isDeload ? (
+                  <>
+                    {isRestRecommended ? (
+                      <span className="rounded-md border border-[#2A2A2A] bg-[#141414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                        Rest recommended
+                      </span>
+                    ) : null}
+                    <span className="rounded-md border border-[#60A5FA]/30 bg-[#60A5FA]/15 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#60A5FA]">
+                      Deload week
+                    </span>
+                  </>
+                ) : isRestRecommended ? (
+                  <span className="rounded-md border border-[#2A2A2A] bg-[#141414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
                     Rest recommended
-                  </Badge>
+                  </span>
                 ) : null}
-                <Badge variant="secondary" className="bg-[#60A5FA]/15 text-[#60A5FA]">
-                  DELOAD WEEK
-                </Badge>
               </div>
-            ) : isRestRecommended ? (
-              <Badge
-                variant="secondary"
-                className="border border-border/70 bg-surface/40 font-medium text-text-secondary"
-              >
-                Rest recommended
-              </Badge>
-            ) : (
-              <Badge variant="accent">NEXT WORKOUT</Badge>
-            )}
-            <h2 className="mt-2 text-3xl font-bold tracking-tight text-text-primary">
-              {displayWorkoutType ? displayHeadline : '…'}
-            </h2>
-            <p className="mt-0.5 text-sm font-medium text-text-secondary">
-              {displayWorkoutType
-                ? reco?.isDeload
-                  ? '50% volume — same weights, half the sets'
-                  : `${FOCUS_SUBTITLE[displayWorkoutType]} • ${WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType].length} exercises`
-                : 'Loading…'}
-            </p>
+              <h2 className="text-4xl font-black tracking-tighter text-white">
+                {displayWorkoutType ? workoutCardTitle || '…' : '…'}
+              </h2>
+              <p className="mt-1 text-sm font-medium text-[#6B7280]">
+                {displayWorkoutType
+                  ? reco?.isDeload
+                    ? '50% volume — same weights, half the sets'
+                    : `${FOCUS_SUBTITLE[displayWorkoutType]} • ${WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType].length} exercises`
+                  : 'Loading…'}
+              </p>
+            </div>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#8B5CF6] shadow-lg shadow-[#8B5CF6]/30">
+              <Dumbbell className="h-6 w-6 text-white" aria-hidden />
+            </div>
           </div>
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent text-white shadow-lg shadow-accent/20">
-            <Dumbbell className="h-6 w-6" />
-          </div>
-        </div>
 
-        {showExercises ? (
-          <div className="mb-2 mt-1 flex flex-col px-1">
+          <div className="pt-1">
             {loading ? (
-              <p className="py-4 text-sm text-text-secondary">Loading targets…</p>
-            ) : (
-              displayRows.map((ex, i) => {
-                const layout = getRecLastLayout(ex.rec, ex.last, ex.progressionStatus);
-                const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
-                const statusPres = getProgressionStatusPresentation(ex.progressionStatus);
-                const statusClass = statusPres?.textClass ?? 'text-accent';
-                return (
-                  <div
-                    key={ex.exerciseId}
-                    className={`flex flex-col gap-1 py-3 ${i !== 0 ? 'border-t border-border/20' : ''}`}
-                  >
-                    <p className="text-base font-semibold text-text-primary">{ex.name}</p>
-                    {layout.kind === 'unified' ? (
-                      <div className="flex min-w-0 items-baseline justify-between gap-3">
-                        <p
-                          className={`min-w-0 font-mono text-sm font-bold leading-snug tracking-tight ${layout.lineClass}`}
-                        >
-                          <span>{layout.label}</span> {layout.value}
-                        </p>
-                        {statusInline ? (
-                          <span
-                            className={`shrink-0 whitespace-nowrap pl-2 text-right text-xs font-medium leading-snug ${statusClass}`}
-                          >
-                            {statusInline}
+              <p className="py-3 text-sm text-[#6B7280]">Loading targets…</p>
+            ) : displayRows.length > 0 ? (
+              <>
+                <div className="divide-y divide-[#2A2A2A]">
+                  {displayRows.map((ex) => {
+                    const layout = getRecLastLayout(ex.rec, ex.last, ex.progressionStatus);
+                    const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
+                    const statusPres = getProgressionStatusPresentation(ex.progressionStatus);
+                    const statusDisplay = progressionStatusDisplayText(statusInline, statusPres?.text);
+                    const statusClass = statusPres?.textClass ?? 'text-[#8B5CF6]';
+                    return (
+                      <div
+                        key={ex.exerciseId}
+                        className="group flex cursor-default items-center justify-between gap-3 py-3"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-base font-bold tracking-tight text-white transition-colors group-hover:text-[#8B5CF6]">
+                          {toDisplayName(ex.name)}
+                        </span>
+                        <div className="flex min-w-0 shrink-0 items-center gap-2">
+                          <span className={recHoldPillClass}>
+                            {layout.kind === 'unified' ? layout.label.replace(':', '').trim() : 'REC'}
                           </span>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex min-w-0 items-baseline justify-between gap-3">
-                          <p className="min-w-0 font-mono text-sm font-bold leading-snug tracking-tight text-accent">
-                            <span>REC:</span> {layout.rec}
-                          </p>
-                          {statusInline ? (
-                            <span
-                              className={`shrink-0 whitespace-nowrap pl-2 text-right text-xs font-medium leading-snug ${statusClass}`}
-                            >
-                              {statusInline}
+                          {statusDisplay ? (
+                            <span className={`whitespace-nowrap text-[11px] font-mono font-bold ${statusClass}`}>
+                              {statusDisplay}
                             </span>
                           ) : null}
                         </div>
-                        <p className="font-mono text-xs font-medium leading-snug text-text-secondary">
-                          LAST: {layout.last}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                );
-              })
-            )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
           </div>
-        ) : null}
 
-        <div className="flex flex-col gap-2">
-          <div className="flex justify-center py-2">
-            <Button
+          <div className="flex flex-col gap-2">
+            <button
               type="button"
-              variant="link"
-              className="px-4 py-3 text-[14px] font-semibold uppercase tracking-wide"
-              onClick={() => setShowExercises((v) => !v)}
-            >
-              {showExercises ? 'Hide Exercises' : 'View Exercises'}
-            </Button>
-          </div>
-          <Button
-            variant={isRestRecommended ? 'secondary' : 'primary'}
-            size="lg"
-            fullWidth
-            type="button"
-            disabled={!reco || loading || displayWorkoutType === null}
-            onClick={() => {
-              if (!reco || displayWorkoutType === null) return;
-              const workoutName =
-                reco.workoutType !== null ? reco.workoutName : reco.trainAnywayName ?? reco.workoutName;
-              onStartWorkout?.({
-                workoutName,
-                workoutType: displayWorkoutType,
-                exerciseTemplate: WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType],
-                openExercisePickerOnMount: false,
-              });
-            }}
-          >
-            <Play className={`h-4 w-4 ${isRestRecommended ? 'text-accent' : 'fill-white'}`} aria-hidden />
-            Start Workout
-          </Button>
-        </div>
-      </Card>
-
-      {/* Quick programs */}
-      <div className="mt-2">
-        <h4 className="mb-4 px-1 text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-          QUICK PROGRAMS
-        </h4>
-        <div className="no-scrollbar flex gap-3 overflow-x-auto pb-4">
-          {QUICK_PROGRAMS.map((prog) => (
-            <Card
-              key={prog.name}
-              padded={false}
-              role="button"
-              tabIndex={0}
-              onClick={() => startQuickProgram(prog.program)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  startQuickProgram(prog.program);
-                }
+              disabled={!reco || loading || displayWorkoutType === null}
+              className={`group flex w-full items-center justify-center gap-2 rounded-2xl py-5 text-base font-black shadow-lg transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+                isRestRecommended
+                  ? 'border border-[#2A2A2A] bg-[#1C1C1C] text-[#8B5CF6] shadow-none'
+                  : 'bg-[#8B5CF6] text-white shadow-[#8B5CF6]/20'
+              }`}
+              onClick={() => {
+                if (!reco || displayWorkoutType === null) return;
+                const workoutName =
+                  reco.workoutType !== null ? reco.workoutName : reco.trainAnywayName ?? reco.workoutName;
+                onStartWorkout?.({
+                  workoutName,
+                  workoutType: displayWorkoutType,
+                  exerciseTemplate: WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType],
+                  openExercisePickerOnMount: false,
+                });
               }}
-              className="flex h-24 min-w-[100px] shrink-0 flex-col items-center justify-center gap-2 bg-surface/30 transition-all hover:border-accent/40 active:scale-95"
             >
-              <span className="text-2xl" aria-hidden>
+              Start Workout
+              <ArrowRight
+                className="h-[18px] w-[18px] transition-transform group-hover:translate-x-1 group-disabled:translate-x-0"
+                aria-hidden
+              />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Tactical templates — 2×2 style grid */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between px-2">
+          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">Tactical Templates</h3>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {QUICK_PROGRAMS.map((prog, idx) => (
+            <button
+              key={prog.name}
+              type="button"
+              onClick={() => startQuickProgram(prog.program)}
+              className={`relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-[#222222] p-5 text-left transition-all active:scale-[0.98] ${
+                idx === 0 ? 'bg-[#181818]' : 'bg-[#111111]'
+              }`}
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#222222] text-2xl" aria-hidden>
                 {prog.emoji}
               </span>
-              <span className="text-xs font-bold uppercase tracking-tight text-text-secondary">{prog.name}</span>
-            </Card>
+              <div className="relative z-10">
+                <span className="block text-lg font-black tracking-tight text-white">{prog.name}</span>
+                <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
+                  Quick start
+                </span>
+              </div>
+              <Dumbbell
+                className="pointer-events-none absolute -bottom-2 -right-2 h-[60px] w-[60px] rotate-12 scale-150 opacity-10 grayscale"
+                aria-hidden
+              />
+            </button>
           ))}
         </div>
-      </div>
-    </div>
+      </section>
+    </motion.div>
   );
 }

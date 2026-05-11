@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -14,19 +14,59 @@
   --color-accent: #8b5cf6;
   --color-success: #22c55e;
   --color-warning: #f59e0b;
+  /* From design-reference */
+  --shadow-glow: 0 0 20px rgba(139, 92, 246, 0.3);
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
-body {
-  @apply bg-bg text-text-primary font-sans antialiased;
+@layer base {
+  #root {
+    min-height: 100vh;
+  }
+
+  html {
+    min-height: 100vh;
+  }
+
+  body {
+    @apply font-sans text-text-primary antialiased;
+    min-height: 100vh;
+    margin: 0;
+    background: radial-gradient(ellipse at top, #1a0f2e 0%, #0a0a0a 60%);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
 }
 
-/* Custom scrollbar for horizontal containers */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-accent {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.05) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 30px rgba(139, 92, 246, 0.15);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }
 
 @keyframes pr-pop {
@@ -44,4 +84,3 @@ body {
 .animate-pr-pop {
   animation: pr-pop 0.55s ease-out;
 }
-

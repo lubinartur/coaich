@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { Badge } from '@/components/ui';
 import { db } from '@/services/db';
 import type { Exercise, MuscleGroup } from '@/types';
+import { toDisplayName } from '@/utils/toDisplayName';
 
 export type ExercisePickerFilter = 'all' | MuscleGroup | 'legs_glutes';
 
@@ -121,7 +122,7 @@ export default function ExercisePicker({ open, onClose, onPick, initialFilter }:
                   key={chip.label}
                   type="button"
                   onClick={() => setFilter(chip.value)}
-                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition-colors ${
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold tracking-wide transition-colors ${
                     active
                       ? 'border-accent bg-accent/15 text-accent'
                       : 'border-border bg-surface text-text-secondary'
@@ -146,7 +147,9 @@ export default function ExercisePicker({ open, onClose, onPick, initialFilter }:
                     onClick={() => handlePick(ex)}
                     className="flex w-full items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:border-border hover:bg-surface/80 active:scale-[0.99]"
                   >
-                    <span className="min-w-0 flex-1 text-sm font-semibold text-text-primary">{ex.name}</span>
+                    <span className="min-w-0 flex-1 text-sm font-semibold text-text-primary">
+                      {toDisplayName(ex.name)}
+                    </span>
                     <Badge variant="secondary" className="shrink-0">
                       {muscleBadgeLabel(ex.muscleGroup)}
                     </Badge>

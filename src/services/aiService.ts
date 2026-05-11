@@ -1,5 +1,6 @@
 /** Anthropic Claude — workout Review (ai-prompts.md). */
 
+import { EXERCISE_SEED } from '@/constants/exercises';
 import { canonicalExerciseId, formatNextTargetLine, isTimedHoldExercise } from '@/services/progressionEngine';
 import type {
   AIReview,
@@ -189,10 +190,27 @@ const parseReviewResponse = (rawText: string): ParsedReviewShape => {
   }
 };
 
+/** Case-insensitive match; hyphens/dashes/underscores treated as spaces for name ↔ library id alignment. */
+function normalizeForExerciseMatch(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[-–—_/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function resolveExerciseId(session: WorkoutSession, exerciseName: string, hintId?: string): string {
-  if (hintId) return canonicalExerciseId(hintId);
-  const match = session.exercises.find((e) => e.exerciseName.toLowerCase() === exerciseName.toLowerCase());
-  if (match) return canonicalExerciseId(match.exerciseId);
+  const n = normalizeForExerciseMatch(exerciseName);
+  if (n) {
+    const fromSession = session.exercises.find(
+      (e) => normalizeForExerciseMatch(e.exerciseName) === n,
+    );
+    if (fromSession) return canonicalExerciseId(fromSession.exerciseId);
+    const fromSeed = EXERCISE_SEED.find((ex) => normalizeForExerciseMatch(ex.name) === n);
+    if (fromSeed) return canonicalExerciseId(fromSeed.id);
+  }
+  if (hintId?.trim()) return canonicalExerciseId(hintId.trim());
   return canonicalExerciseId(exerciseName);
 }
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Check, Plus, Trash2 } from 'lucide-react';
-import { ProgressionStatusNote } from '@/components/ProgressionStatusNote';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, Check, Plus, Trash2 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
 import type { LoggerTemplateExercise } from '@/constants/workoutPrograms';
 import { db, getProfile } from '@/services/db';
@@ -9,6 +9,8 @@ import {
   canonicalExerciseId,
   formatTargetLineForExercise,
   getLastPerformedSummary,
+  getProgressionStatusInlineText,
+  getProgressionStatusPresentation,
   getRecLastLayout,
   isTimedHoldExercise,
   parseRecommendLine,
@@ -17,6 +19,8 @@ import {
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession, WorkoutType } from '@/types';
 import ExercisePicker, { type ExercisePickerFilter } from '@/screens/Logger/ExercisePicker';
+import { progressionStatusDisplayText } from '@/utils/progressionDisplayLabels';
+import { toDisplayName } from '@/utils/toDisplayName';
 
 type SetRow = {
   id: string;
@@ -79,28 +83,43 @@ async function buildLoggerExerciseRow(def: LoggerTemplateExercise): Promise<Logg
   const profile = await getProfile();
   const goal = profile?.goal ?? 'muscle';
   const pharma = profile?.pharmacology ?? 'natural';
+  const cid = canonicalExerciseId(def.exerciseId);
+
+  let storedTarget = await db.exerciseTargets.get(cid);
+  if (!storedTarget && def.exerciseId !== cid) {
+    storedTarget = await db.exerciseTargets.get(def.exerciseId);
+  }
+
   const preview = await previewExerciseTarget(def.exerciseId, def.name, goal, pharma);
   const progressionStatus: ProgressionStatus = preview?.progressionStatus ?? 'first_session';
 
-  const meta = await db.exercises.get(canonicalExerciseId(def.exerciseId));
+  const meta = await db.exercises.get(cid);
   const timedHold = isTimedHoldExercise(def.exerciseId, def.name, meta?.timedHold);
 
-  const target = await db.exerciseTargets.get(def.exerciseId);
+  const target =
+    storedTarget != null
+      ? { weight: storedTarget.weight, reps: storedTarget.reps, sets: storedTarget.sets }
+      : preview != null
+        ? { weight: preview.weight, reps: preview.reps, sets: preview.sets }
+        : null;
+
   const last = await getLastPerformedSummary(def.exerciseId);
+  /** Dexie / engine may omit sets or use 0; still apply weight×reps with a sensible set count. */
+  const numSets = target != null ? Math.max(1, Number(target.sets) || 3) : 0;
   const recommend = target
     ? formatTargetLineForExercise(
         def.exerciseId,
         def.name,
         target.weight,
         target.reps,
-        target.sets,
+        numSets,
         def.equipment,
         timedHold,
       )
     : '';
   const sets =
-    target && target.sets > 0
-      ? Array.from({ length: target.sets }, () => ({
+    target != null && numSets > 0
+      ? Array.from({ length: numSets }, () => ({
           id: makeId(),
           weight: def.equipment === 'bodyweight' ? '0' : String(target.weight),
           reps: String(target.reps),
@@ -140,26 +159,41 @@ async function buildSwappedLoggerExercise(old: LoggerExercise, picked: Exercise)
   const profile = await getProfile();
   const goal = profile?.goal ?? 'muscle';
   const pharma = profile?.pharmacology ?? 'natural';
+  const cid = canonicalExerciseId(picked.id);
+
+  let storedTarget = await db.exerciseTargets.get(cid);
+  if (!storedTarget && picked.id !== cid) {
+    storedTarget = await db.exerciseTargets.get(picked.id);
+  }
+
   const preview = await previewExerciseTarget(picked.id, picked.name, goal, pharma);
   const progressionStatus: ProgressionStatus = preview?.progressionStatus ?? 'first_session';
   const timedHold = isTimedHoldExercise(picked.id, picked.name, picked.timedHold);
-  const target = await db.exerciseTargets.get(picked.id);
+
+  const target =
+    storedTarget != null
+      ? { weight: storedTarget.weight, reps: storedTarget.reps, sets: storedTarget.sets }
+      : preview != null
+        ? { weight: preview.weight, reps: preview.reps, sets: preview.sets }
+        : null;
+
   const last = await getLastPerformedSummary(picked.id);
+  const numSets = target != null ? Math.max(1, Number(target.sets) || 3) : 0;
   const recommend = target
     ? formatTargetLineForExercise(
         picked.id,
         picked.name,
         target.weight,
         target.reps,
-        target.sets,
+        numSets,
         picked.equipment,
         timedHold,
       )
     : '';
 
   let sets: SetRow[];
-  if (target && target.sets > 0) {
-    sets = Array.from({ length: target.sets }, () => ({
+  if (target != null && numSets > 0) {
+    sets = Array.from({ length: numSets }, () => ({
       id: makeId(),
       weight: picked.equipment === 'bodyweight' ? '0' : String(target.weight),
       reps: String(target.reps),
@@ -233,8 +267,11 @@ function buildSessionExercises(exercises: LoggerExercise[]): SessionExercise[] {
   });
 }
 
-const inputClass =
-  'min-w-0 flex-1 rounded-lg border border-border bg-surface p-2 text-center font-mono text-sm text-text-primary outline-none transition-colors focus:border-accent';
+const fieldInputClass =
+  'min-h-[64px] w-full min-w-0 rounded-xl border border-[#222222] bg-[#111111] px-2 py-5 text-center font-black tabular-nums text-2xl text-white outline-none transition-all focus:border-[#8B5CF6] focus:ring-4 focus:ring-[#8B5CF6]/10';
+
+const setActionsBtnClass =
+  'flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#222222] bg-[#111111] py-3.5 text-xs font-semibold text-[#6B7280] transition-all hover:bg-[#181818] hover:border-[#8B5CF6]/25 hover:text-[#8B5CF6] active:scale-[0.98]';
 
 function formatRestMmSs(totalSec: number): string {
   const s = Math.max(0, totalSec);
@@ -262,12 +299,15 @@ export default function LoggerScreen({
 }: LoggerScreenProps) {
   const [startedAt] = useState(() => new Date().toISOString());
   const [seconds, setSeconds] = useState(0);
+  /** Workout clock runs only after the user taps Start Session (not on mount). */
+  const [isStarted, setIsStarted] = useState(false);
   const [exercises, setExercises] = useState<LoggerExercise[]>(() => skeletonFromTemplate(exerciseTemplate));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [swapExIdx, setSwapExIdx] = useState<number | null>(null);
   const [pickerInitialFilter, setPickerInitialFilter] = useState<ExercisePickerFilter | undefined>(undefined);
   const [removeConfirm, setRemoveConfirm] = useState<{ exIdx: number; name: string } | null>(null);
   const templateKey = exerciseTemplate.map((e) => e.exerciseId).join('|');
+  const templateLoadGenRef = useRef(0);
   const [restDurationSec, setRestDurationSec] = useState(90);
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
   const [restZeroFlash, setRestZeroFlash] = useState(false);
@@ -293,23 +333,27 @@ export default function LoggerScreen({
   }, [openExercisePickerOnMount]);
 
   useEffect(() => {
+    const gen = ++templateLoadGenRef.current;
     let cancelled = false;
     setExercises(skeletonFromTemplate(exerciseTemplate));
+    const template = exerciseTemplate;
     void (async () => {
-      const built = await buildLoggerExercisesFromTemplate(exerciseTemplate);
-      if (!cancelled) setExercises(built);
+      const built = await buildLoggerExercisesFromTemplate(template);
+      if (cancelled || gen !== templateLoadGenRef.current) return;
+      setExercises(built);
     })();
     return () => {
       cancelled = true;
     };
-  }, [workoutName, workoutType, templateKey]);
+  }, [workoutName, workoutType, templateKey, exerciseTemplate]);
 
   useEffect(() => {
+    if (!isStarted) return undefined;
     const id = window.setInterval(() => {
       setSeconds((s) => s + 1);
     }, 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [isStarted]);
 
   useEffect(() => {
     if (restRemaining === null) return undefined;
@@ -495,7 +539,16 @@ export default function LoggerScreen({
       ratings: [],
     };
     await db.workoutSessions.add(session);
-    const prRows = buildPrRecordsForSession(id, finishedAt, exercises);
+    const prRows = buildPrRecordsForSession(
+      id,
+      finishedAt,
+      exercises.map((ex) => ({
+        exerciseId: ex.exerciseId,
+        exerciseName: ex.name,
+        equipment: ex.equipment,
+        sets: ex.sets,
+      })),
+    );
     if (prRows.length > 0) {
       await db.prRecords.bulkAdd(prRows);
     }
@@ -503,7 +556,7 @@ export default function LoggerScreen({
   };
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-bg">
+    <div className="flex min-h-screen w-full flex-col bg-[#0A0A0A] pt-1">
       <ExercisePicker
         open={pickerOpen}
         onClose={closePicker}
@@ -519,8 +572,8 @@ export default function LoggerScreen({
             aria-label="Close"
             onClick={() => setRemoveConfirm(null)}
           />
-          <Card className="relative z-10 w-full max-w-sm border-border p-5 shadow-2xl">
-            <p className="text-center text-sm font-medium leading-snug text-text-primary">
+          <Card className="relative z-10 w-full max-w-sm border-[#2A2A2A] bg-[#1C1C1C] p-5 shadow-2xl">
+            <p className="text-center text-sm font-medium leading-snug text-white">
               Remove {removeConfirm.name}?
             </p>
             <div className="mt-4 flex gap-2">
@@ -549,31 +602,28 @@ export default function LoggerScreen({
         </div>
       ) : null}
 
-      <header className="sticky top-0 z-10 shrink-0 border-b border-border bg-bg/95 px-5 py-4 backdrop-blur-md">
-        <div className="mb-3 flex items-start gap-3">
+      <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-[#2A2A2A] bg-[#0A0A0A]/95 px-6 py-4 backdrop-blur-md">
+        <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={tryClose}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-primary transition-colors active:scale-[0.98]"
+            className="-ml-1 p-1 text-white transition-opacity hover:opacity-80"
             aria-label="Close workout"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-6 w-6" />
           </button>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold leading-tight text-text-primary">{workoutName}</h2>
-            <div className="mt-1 flex items-center gap-1.5 font-mono text-sm font-bold text-accent">
-              <span aria-hidden>⏱</span>
-              <span>{formatElapsed(seconds)}</span>
-            </div>
+          <div>
+            <h1 className="text-lg font-bold text-white">{toDisplayName(workoutName)}</h1>
+            <p className="font-mono text-sm font-medium tabular-nums text-[#8B5CF6]">{formatElapsed(seconds)}</p>
           </div>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 pb-32 no-scrollbar">
+      <div className="min-h-0 flex-1 space-y-10 overflow-y-auto px-4 py-8 pb-40 no-scrollbar">
         {exercises.length === 0 ? (
-          <Card className="border-border py-10 text-center">
-            <p className="text-sm text-text-secondary">No exercises yet. Tap + Add Exercise to begin.</p>
-          </Card>
+          <div className="rounded-2xl border border-[#2A2A2A] bg-[#141414] py-10 text-center">
+            <p className="text-sm text-[#6B7280]">No exercises yet. Tap Add Exercise to begin.</p>
+          </div>
         ) : (
           exercises.map((ex, exIdx) => {
             const recLastLayout = getRecLastLayout(
@@ -583,173 +633,241 @@ export default function LoggerScreen({
             );
             const isBw = ex.equipment === 'bodyweight';
             const isTimed = ex.timedHold;
+            const pres = getProgressionStatusPresentation(ex.progressionStatus);
+            const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
+            const statusDisplay = progressionStatusDisplayText(statusInline, pres?.text);
             return (
-            <Card key={`${ex.exerciseId}-${exIdx}`} className="border-border">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="min-w-0 flex-1 text-lg font-bold leading-tight text-text-primary">{ex.name}</h3>
-                <button
-                  type="button"
-                  onClick={() => setRemoveConfirm({ exIdx, name: ex.name })}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-text-secondary/50 transition-colors hover:text-red-400"
-                  aria-label={`Remove ${ex.name}`}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
-              <div className="mt-3 flex flex-col gap-2">
-                {recLastLayout.kind === 'unified' ? (
-                  <p className="font-mono text-[13px] font-bold uppercase leading-snug tracking-wide">
-                    <span className="text-text-secondary">{recLastLayout.label} </span>
-                    <span className={recLastLayout.lineClass}>{recLastLayout.value}</span>
-                  </p>
-                ) : (
-                  <>
-                    {ex.recommend.trim() ? (
-                      <p className="font-mono text-[13px] font-bold uppercase leading-snug tracking-wide text-accent">
-                        RECOMMEND {ex.recommend}
-                      </p>
-                    ) : null}
-                    <p className="font-mono text-[13px] font-bold uppercase leading-snug tracking-wide text-text-secondary">
-                      LAST {ex.last}
-                    </p>
-                  </>
-                )}
-                <ProgressionStatusNote status={ex.progressionStatus} />
-              </div>
+              <section key={`${ex.exerciseId}-${exIdx}`} className="space-y-6">
+                <div className="flex items-end justify-between border-b border-[#222222] pb-4">
+                  <div>
+                    <h3 className="text-2xl font-bold tracking-tight text-white">{toDisplayName(ex.name)}</h3>
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <div className="inline-flex items-center gap-1.5 rounded border border-[#333333] bg-[#222222] px-2 py-0.5">
+                        <div
+                          className={`h-1 w-1 rounded-full animate-pulse ${pres?.dotClass ?? 'bg-[#6B7280]'}`}
+                          aria-hidden
+                        />
+                        {pres == null && statusInline == null ? (
+                          <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                            START
+                          </span>
+                        ) : null}
+                      </div>
+                      {statusDisplay ? (
+                        <span
+                          className={`text-[11px] font-mono font-bold ${pres?.textClass ?? 'text-[#8B5CF6]'}`}
+                        >
+                          {statusDisplay}
+                        </span>
+                      ) : !pres ? (
+                        <span className="text-[11px] font-mono font-bold text-[#6B7280]">First session</span>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 space-y-1 font-mono text-[12px] font-bold tracking-wide text-[#6B7280]">
+                      {recLastLayout.kind === 'unified' ? (
+                        <p>
+                          <span className="text-[#6B7280]">{recLastLayout.label} </span>
+                          <span className={recLastLayout.lineClass}>{recLastLayout.value}</span>
+                        </p>
+                      ) : (
+                        <>
+                          {ex.recommend.trim() ? (
+                            <p className="text-[#8B5CF6]">Recommend {ex.recommend}</p>
+                          ) : null}
+                          <p>Last {ex.last}</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRemoveConfirm({ exIdx, name: ex.name })}
+                    className="p-1 text-[#333333] transition-colors hover:text-red-400"
+                    aria-label={`Remove ${ex.name}`}
+                  >
+                    <Trash2 className="h-[18px] w-[18px]" aria-hidden />
+                  </button>
+                </div>
 
-              <div className="mt-4 flex flex-col gap-2">
-                {ex.sets.map((set, setIdx) => (
-                  <div key={set.id} className="flex items-center gap-2">
-                    <span className="w-11 shrink-0 text-[10px] font-bold text-text-secondary">
-                      SET {setIdx + 1}
-                    </span>
+                <div className="space-y-2">
+                  <div
+                    className={`grid items-end gap-3 px-1 pb-1 pt-0 text-[10px] font-black uppercase tracking-widest text-[#6B7280] sm:gap-4 ${
+                      isBw
+                        ? 'grid-cols-[32px_minmax(0,1fr)_52px]'
+                        : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]'
+                    }`}
+                  >
+                    <span aria-hidden className="block min-h-[1em]" />
                     {!isBw ? (
                       <>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          placeholder="kg"
-                          className={inputClass}
-                          value={set.weight}
-                          onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value)}
-                          onFocus={(e) => e.currentTarget.select()}
-                        />
-                        <span className="shrink-0 text-text-secondary">×</span>
+                        <span className="block text-center">Weight</span>
+                        <span className="flex justify-center" aria-hidden>
+                          ×
+                        </span>
+                        <span className="block text-center">Reps</span>
                       </>
-                    ) : null}
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder={isTimed ? 's' : 'reps'}
-                      aria-label={isTimed ? 'Seconds' : 'Reps'}
-                      className={`${inputClass} ${isBw ? 'flex-1' : ''}`}
-                      value={set.reps}
-                      onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                    {isTimed ? (
-                      <span className="shrink-0 text-xs font-medium text-text-secondary" aria-hidden>
-                        s
-                      </span>
-                    ) : null}
-                    {set.isPR ? (
-                      <span
-                        key={`pr-${set.id}-on`}
-                        className="animate-pr-pop flex shrink-0 items-center gap-0.5 rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#F59E0B]"
-                        title="Personal record"
-                      >
-                        <span aria-hidden>🏆</span>
-                        PR
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      aria-label={set.completed ? 'Uncomplete set' : 'Complete set'}
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                        set.completed
-                          ? 'border-accent bg-accent text-white'
-                          : 'border-border bg-surface text-text-secondary'
-                      }`}
-                      onClick={() => toggleSetComplete(exIdx, setIdx)}
-                    >
-                      <Check className="h-5 w-5" strokeWidth={2.5} />
-                    </button>
+                    ) : (
+                      <>
+                        <span className="block text-center">{isTimed ? 'Sec' : 'Reps'}</span>
+                        <span aria-hidden className="block min-h-[1em]" />
+                      </>
+                    )}
+                    {!isBw ? <span aria-hidden className="block min-h-[1em]" /> : null}
                   </div>
-                ))}
-              </div>
+                  <div className="space-y-5">
+                    {ex.sets.map((set, setIdx) => (
+                      <motion.div
+                        layout
+                        key={set.id}
+                        className={`grid items-center gap-3 rounded-2xl px-1 py-3 transition-all sm:gap-4 ${
+                          isBw
+                            ? 'grid-cols-[32px_minmax(0,1fr)_52px]'
+                            : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]'
+                        } ${set.completed ? 'border border-[#22C55E]/10 bg-[#22C55E]/5' : 'bg-transparent'}`}
+                      >
+                        <div className="text-center">
+                          <span className="block text-[10px] font-black text-[#6B7280]">SET</span>
+                          <span className="text-sm font-black tabular-nums text-white">{setIdx + 1}</span>
+                        </div>
+                        {!isBw ? (
+                          <>
+                            <div className="min-w-0">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                autoComplete="off"
+                                placeholder="0"
+                                className={fieldInputClass}
+                                value={set.weight}
+                                onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value)}
+                                onFocus={(e) => e.currentTarget.select()}
+                              />
+                            </div>
+                            <span className="flex shrink-0 items-center justify-center font-black text-[#333333]">×</span>
+                          </>
+                        ) : null}
+                        <div className="min-w-0">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            placeholder="0"
+                            aria-label={isTimed ? 'Seconds' : 'Reps'}
+                            className={fieldInputClass}
+                            value={set.reps}
+                            onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
+                            onFocus={(e) => e.currentTarget.select()}
+                          />
+                        </div>
+                        <div className="flex min-w-0 items-stretch justify-end">
+                          <button
+                            type="button"
+                            aria-label={set.completed ? 'Uncomplete set' : 'Complete set'}
+                            className={`flex min-h-[64px] w-[52px] shrink-0 items-center justify-center rounded-xl border shadow-lg transition-all ${
+                              set.completed
+                                ? 'border-[#22C55E] bg-[#22C55E] text-white shadow-[#22C55E]/20'
+                                : 'border-[#222222] bg-[#111111] text-[#333333] hover:border-[#8B5CF6]'
+                            }`}
+                            onClick={() => toggleSetComplete(exIdx, setIdx)}
+                          >
+                            <Check className="h-6 w-6" strokeWidth={4} />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
 
-              <div className="mt-3 flex flex-col items-center gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => addSet(exIdx)}
-                  className="border border-border/50 bg-transparent px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-none hover:bg-surface/50 hover:text-text-primary"
-                >
-                  + ADD SET
-                </Button>
-                <button
-                  type="button"
-                  className="text-center text-xs text-text-secondary/50 underline-offset-2 hover:text-text-secondary hover:underline"
-                  onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
-                >
-                  swap exercise
-                </button>
-              </div>
-            </Card>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => addSet(exIdx)}
+                    className={setActionsBtnClass}
+                  >
+                    <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                    ＋ Add
+                  </button>
+                  <button
+                    type="button"
+                    className={setActionsBtnClass}
+                    onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
+                  >
+                    <ArrowLeftRight className="h-4 w-4 shrink-0" aria-hidden />
+                    ⇄ Swap
+                  </button>
+                </div>
+              </section>
             );
           })
         )}
       </div>
 
-      {restRemaining !== null ? (
-        <div
-          className="fixed bottom-[5.75rem] left-0 right-0 z-[45] flex justify-center px-5 pointer-events-none"
-          role="status"
-          aria-live="polite"
-          aria-label={`Rest timer ${formatRestMmSs(restRemaining)} remaining`}
-        >
-          <div
-            className={`pointer-events-auto flex items-center gap-5 rounded-full border px-6 py-3 backdrop-blur-md bg-surface transition-[border-color,box-shadow] duration-150 ${
-              restZeroFlash
-                ? 'animate-pulse border-accent shadow-lg shadow-accent/35 ring-2 ring-accent/50'
-                : 'border-accent/40'
-            }`}
+      <AnimatePresence>
+        {restRemaining !== null ? (
+          <motion.div
+            key="rest-timer"
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            className="fixed bottom-24 left-1/2 z-40 w-[calc(100%-2.5rem)] max-w-[360px] -translate-x-1/2"
+            role="status"
+            aria-live="polite"
+            aria-label={`Rest timer ${formatRestMmSs(restRemaining)} remaining`}
           >
-            <span className="whitespace-nowrap font-mono text-sm font-bold tabular-nums tracking-tight text-text-primary">
-              Rest {formatRestMmSs(restRemaining)}
-            </span>
-            <button
-              type="button"
-              onClick={dismissRestTimer}
-              className="shrink-0 text-sm font-semibold text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline"
+            <div
+              className={`flex items-center gap-4 rounded-full border px-6 py-3 shadow-2xl transition-all ${
+                restZeroFlash
+                  ? 'animate-pulse border-[#8B5CF6] bg-[#8B5CF6] text-white'
+                  : 'border-[#2A2A2A] bg-[#1C1C1C]'
+              }`}
             >
-              Skip
-            </button>
-          </div>
-        </div>
-      ) : null}
+              <span className="w-20 text-sm font-bold tabular-nums text-white">
+                Rest {formatRestMmSs(restRemaining)}
+              </span>
+              <div className="h-4 w-px bg-[#2A2A2A]" aria-hidden />
+              <button
+                type="button"
+                onClick={dismissRestTimer}
+                className="text-xs font-bold text-[#8B5CF6]"
+              >
+                Skip
+              </button>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
-      <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex justify-center border-t border-border bg-bg/95 backdrop-blur-md">
-        <div className="pointer-events-auto flex w-full max-w-[390px] items-stretch gap-3 px-5 py-4">
-          <Button type="button" variant="dark" size="md" className="min-w-0 flex-1" onClick={openPickerForAdd}>
-            <Plus className="h-4 w-4 shrink-0" aria-hidden />
-            + Add Exercise
-          </Button>
-          <Button
+      <footer className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex max-w-[390px] gap-3 border-t border-[#2A2A2A] bg-[#141414] p-4">
+        <button
+          type="button"
+          onClick={openPickerForAdd}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-4 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
+        >
+          <Plus className="h-[18px] w-[18px]" aria-hidden />
+          Add Exercise
+        </button>
+        {!isStarted ? (
+          <button
             type="button"
-            variant="primary"
-            size="md"
-            className="shrink-0 px-6"
+            disabled={exercises.length === 0}
+            onClick={() => setIsStarted(true)}
+            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#22C55E] px-8 py-4 text-sm font-bold text-white shadow-lg shadow-[#22C55E]/25 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Start Session
+            <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
             disabled={exercises.length === 0}
             onClick={() => void handleFinish()}
+            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#8B5CF6] px-8 py-4 text-sm font-bold text-white shadow-lg shadow-[#8B5CF6]/20 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           >
             Finish
-          </Button>
-        </div>
-      </div>
+            <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+        )}
+      </footer>
     </div>
   );
 }

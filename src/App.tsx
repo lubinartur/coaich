@@ -60,7 +60,7 @@ export default function App() {
 
   if (booting) {
     return (
-      <div className="flex min-h-screen justify-center bg-bg">
+      <div className="flex min-h-screen justify-center">
         <div className="flex w-full max-w-[390px] items-center justify-center border-x border-border">
           <div className="h-8 w-8 animate-pulse rounded-full border-2 border-border border-t-accent" aria-hidden />
         </div>
@@ -70,7 +70,7 @@ export default function App() {
 
   if (needsOnboarding) {
     return (
-      <div className="flex min-h-screen justify-center bg-bg">
+      <div className="flex min-h-screen justify-center">
         <div className="relative min-h-screen w-full max-w-[390px] overflow-hidden border-x border-border shadow-2xl">
           <OnboardingScreen
             onComplete={() => {
@@ -84,8 +84,8 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen justify-center bg-bg">
-      <div className="relative flex min-h-screen w-full max-w-[390px] flex-col overflow-hidden border-x border-border bg-bg shadow-2xl">
+    <div className="flex min-h-screen justify-center">
+      <div className="relative flex min-h-screen w-full max-w-[390px] flex-col overflow-hidden border-x border-border shadow-2xl">
         {overlay === 'import' ? (
           <ImportScreen
             onBack={() => {
@@ -207,10 +207,6 @@ export default function App() {
               {tab === 'history' && (
                 <HistoryScreen
                   refreshKey={historyRefreshKey}
-                  onEditWorkout={(sessionId) => {
-                    setEditContext({ sessionId, returnTo: 'history' });
-                    setOverlay('editWorkout');
-                  }}
                   onSelectWorkout={({ sessionId, workoutName, workoutDate }) => {
                     setActiveSessionId(sessionId);
                     setReviewBackTab('history');

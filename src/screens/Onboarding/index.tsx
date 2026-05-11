@@ -1,22 +1,94 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import type {
-  Profile,
-  TrainingEnvironment,
-} from '@/types';
+import { AnimatePresence, motion } from 'motion/react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { Profile, TrainingEnvironment } from '@/types';
 import { db } from '@/services/db';
-import { Button, Card } from '@/components/ui';
 
 const STEPS = 7;
 
-const inputClass =
-  'w-full rounded-lg border border-border bg-surface p-3 text-sm text-text-primary outline-none transition-colors focus:border-accent font-mono';
+const fieldInputClass =
+  'w-full rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] p-4 text-base text-white outline-none transition-colors placeholder:text-[#6B7280]/60 focus:border-[#8B5CF6]';
 
 type Goal = Profile['goal'];
 type Experience = Profile['experience'];
 
 interface OnboardingScreenProps {
   onComplete: () => void;
+}
+
+function cx(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(' ');
+}
+
+type TrainingStatusDraft = 'NATURAL' | 'ON_CYCLE';
+
+/** Intermediate onboarding payload (maps 1:1 from UI / design-reference style fields). */
+type OnboardingDraftPayload = {
+  gender: 'male' | 'female';
+  age: number;
+  weight: number;
+  height: number;
+  goal: string;
+  experience: string;
+  environment: TrainingEnvironment;
+  injuries: string[];
+  benchmarks: Partial<{ benchPress: number; squat: number; deadlift: number }>;
+  trainingStatus: TrainingStatusDraft;
+  cycleInfo?: { compound?: string; startDate?: string };
+};
+
+function mapOnboardingDraftToDexieProfile(draft: OnboardingDraftPayload): Profile {
+  const ALLOWED_GOALS: Profile['goal'][] = ['muscle', 'strength', 'weight_loss', 'health'];
+  let mappedGoal: Profile['goal'] =
+    draft.goal === 'loss' ? 'weight_loss' : (draft.goal as Profile['goal']);
+  if (!ALLOWED_GOALS.includes(mappedGoal)) {
+    mappedGoal = 'health';
+  }
+
+  const expLower = draft.experience.toLowerCase();
+  const experience = (
+    expLower === 'beginner' || expLower === 'intermediate' || expLower === 'advanced'
+      ? expLower
+      : 'beginner'
+  ) as Profile['experience'];
+
+  const pharmacology: Profile['pharmacology'] =
+    draft.trainingStatus === 'ON_CYCLE' ? 'on_cycle' : 'natural';
+
+  const profile: Profile = {
+    id: 1,
+    gender: draft.gender,
+    age: draft.age,
+    weight: draft.weight,
+    height: draft.height,
+    goal: mappedGoal,
+    experience,
+    trainingEnvironment: draft.environment,
+    injuries: draft.injuries,
+    pharmacology,
+    restTimer: 90,
+    language: 'en',
+  };
+
+  const { benchPress, squat, deadlift } = draft.benchmarks;
+  if (benchPress != null && benchPress > 0 && Number.isFinite(benchPress)) {
+    profile.benchPress10RM = Math.round(benchPress * 10) / 10;
+  }
+  if (squat != null && squat > 0 && Number.isFinite(squat)) {
+    profile.squat10RM = Math.round(squat * 10) / 10;
+  }
+  if (deadlift != null && deadlift > 0 && Number.isFinite(deadlift)) {
+    profile.deadlift10RM = Math.round(deadlift * 10) / 10;
+  }
+
+  if (pharmacology === 'on_cycle') {
+    const compound = draft.cycleInfo?.compound?.trim();
+    if (compound) profile.cycleCompound = compound;
+    const start = draft.cycleInfo?.startDate?.trim();
+    if (start) profile.cycleStartDate = start;
+  }
+
+  return profile;
 }
 
 export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
@@ -114,7 +186,6 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
     setStep(7);
   };
 
-  /** Positive kg saved on profile as a finite number (optional benchmarks). */
   const parseOptionalKg = (v: string): number | undefined => {
     const t = v.trim().replace(',', '.');
     if (t === '') return undefined;
@@ -123,458 +194,405 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
     return Math.round(n * 10) / 10;
   };
 
-  const finish = async () => {
+  const handleComplete = async () => {
     if (!step7Valid || !gender || !goal || !experience || !environment || !pharmacology) return;
 
-    const benchPress10RM = parseOptionalKg(bench10);
-    const squat10RM = parseOptionalKg(squat10);
-    const deadlift10RM = parseOptionalKg(deadlift10);
+    const benchPress = parseOptionalKg(bench10);
+    const squat = parseOptionalKg(squat10);
+    const deadlift = parseOptionalKg(deadlift10);
 
-    const profile: Profile = {
-      id: 1,
+    const draft: OnboardingDraftPayload = {
       gender,
       age: Math.round(Number(age)),
       weight: Number(weight),
       height: Number(height),
       goal,
       experience,
-      trainingEnvironment: environment,
+      environment,
       injuries: noneInjury ? [] : [...injuries],
-      pharmacology,
-      restTimer: 90,
-      language: 'en',
-      benchPress10RM,
-      squat10RM,
-      deadlift10RM,
+      benchmarks: {
+        ...(benchPress != null ? { benchPress } : {}),
+        ...(squat != null ? { squat } : {}),
+        ...(deadlift != null ? { deadlift } : {}),
+      },
+      trainingStatus: pharmacology === 'on_cycle' ? 'ON_CYCLE' : 'NATURAL',
+      cycleInfo:
+        pharmacology === 'on_cycle'
+          ? {
+              compound: cycleCompound.trim() || undefined,
+              startDate: cycleStartDate.trim() || undefined,
+            }
+          : undefined,
     };
 
-    if (pharmacology === 'on_cycle') {
-      const trimmed = cycleCompound.trim();
-      if (trimmed) profile.cycleCompound = trimmed;
-      if (cycleStartDate.trim()) profile.cycleStartDate = cycleStartDate.trim();
-    }
-
-    await db.profile.put(profile);
+    const finalProfile = mapOnboardingDraftToDexieProfile(draft);
+    await db.profile.put(finalProfile);
     onComplete();
   };
 
-  const selectedCard = (active: boolean) =>
-    active
-      ? 'border-accent bg-accent/5 shadow-lg shadow-accent/10'
-      : 'border-border hover:border-border bg-card';
+  const choiceCard = (active: boolean) =>
+    cx(
+      'rounded-2xl border p-6 text-left transition-all active:scale-[0.99]',
+      active ? 'border-[#8B5CF6] bg-[#1C1C1C] shadow-[0_0_24px_rgba(139,92,246,0.12)]' : 'border-[#2A2A2A] bg-[#1C1C1C] hover:border-[#3F3F3F]',
+    );
+
+  const genderBtn = (g: 'male' | 'female', label: string) => (
+    <button
+      type="button"
+      onClick={() => setGender(g)}
+      className={cx(
+        'flex-1 rounded-xl border py-4 text-center text-sm font-bold transition-all active:scale-[0.99]',
+        gender === g
+          ? 'border-[#8B5CF6] bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
+          : 'border-[#2A2A2A] bg-[#1C1C1C] text-white hover:border-[#3F3F3F]',
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  const pharmaBtn = (p: 'natural' | 'on_cycle', label: string) => (
+    <button
+      type="button"
+      onClick={() => setPharmacology(p)}
+      className={cx(
+        'flex-1 rounded-xl border py-4 text-center text-sm font-bold transition-all active:scale-[0.99]',
+        pharmacology === p
+          ? 'border-[#8B5CF6] bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
+          : 'border-[#2A2A2A] bg-[#1C1C1C] text-white hover:border-[#3F3F3F]',
+      )}
+    >
+      {label}
+    </button>
+  );
 
   return (
-    <div className="flex min-h-screen flex-col bg-bg">
-      <div className="flex shrink-0 flex-col px-5 pt-6">
-        <div className="mb-4 flex items-center gap-3">
-          {step > 1 ? (
-            <button
-              type="button"
-              onClick={goBack}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-primary transition-colors active:scale-[0.98]"
-              aria-label="Back"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          ) : (
-            <div className="w-10" aria-hidden />
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-              <span>
-                Step {step} of {STEPS}
-              </span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface">
-              <div
-                className="h-full rounded-full bg-accent transition-all duration-300"
-                style={{ width: `${(step / STEPS) * 100}%` }}
-              />
-            </div>
-          </div>
+    <div className="flex min-h-screen flex-col bg-[#0A0A0A] text-white">
+      <div className="shrink-0 px-6 pb-4 pt-8">
+        <div className="mb-6 flex gap-2">
+          {Array.from({ length: STEPS }, (_, i) => (
+            <div
+              key={i}
+              className={cx('h-1.5 flex-1 rounded-full transition-colors', i < step ? 'bg-[#8B5CF6]' : 'bg-[#2A2A2A]')}
+            />
+          ))}
         </div>
+        <p className="text-xs font-medium text-[#6B7280]">
+          Step {step} of {STEPS}
+        </p>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 no-scrollbar">
-        {step === 1 && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Basic info</h1>
-              <p className="mt-1 text-sm text-text-secondary">Tell us a bit about you.</p>
-            </div>
-
-            <div>
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-text-secondary">Gender</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setGender('male')}
-                  className={`rounded-xl border py-4 text-center text-sm font-semibold transition-all ${
-                    gender === 'male'
-                      ? 'border-accent bg-accent text-white shadow-lg shadow-accent/20'
-                      : 'border-border bg-surface text-text-primary active:scale-[0.98]'
-                  }`}
-                >
-                  Male
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGender('female')}
-                  className={`rounded-xl border py-4 text-center text-sm font-semibold transition-all ${
-                    gender === 'female'
-                      ? 'border-accent bg-accent text-white shadow-lg shadow-accent/20'
-                      : 'border-border bg-surface text-text-primary active:scale-[0.98]'
-                  }`}
-                >
-                  Female
-                </button>
-              </div>
-            </div>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Age</span>
-              <input
-                className={inputClass}
-                inputMode="numeric"
-                type="number"
-                min={1}
-                placeholder="Years"
-                value={age}
-                onChange={(e) => setAge(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Weight (kg)</span>
-              <input
-                className={inputClass}
-                inputMode="decimal"
-                type="number"
-                min={1}
-                step="0.1"
-                placeholder="kg"
-                value={weight}
-                onChange={(e) => setWeight(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Height (cm)</span>
-              <input
-                className={inputClass}
-                inputMode="numeric"
-                type="number"
-                min={1}
-                placeholder="cm"
-                value={height}
-                onChange={(e) => setHeight(e.target.value)}
-              />
-            </label>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Your goal</h1>
-              <p className="mt-1 text-sm text-text-secondary">What are you training for?</p>
-            </div>
-            {(
-              [
-                {
-                  id: 'muscle' as const,
-                  icon: '💪',
-                  title: 'Muscle',
-                  desc: 'Build muscle mass',
-                },
-                {
-                  id: 'strength' as const,
-                  icon: '🏋️',
-                  title: 'Strength',
-                  desc: 'Get stronger',
-                },
-                {
-                  id: 'weight_loss' as const,
-                  icon: '🔥',
-                  title: 'Weight Loss',
-                  desc: 'Burn fat',
-                },
-                {
-                  id: 'health' as const,
-                  icon: '❤️',
-                  title: 'Health',
-                  desc: 'Stay healthy',
-                },
-              ] as const
-            ).map((opt) => (
-              <Card
-                key={opt.id}
-                padded
-                onClick={() => setGoal(opt.id)}
-                className={`${selectedCard(goal === opt.id)} flex flex-row items-center gap-4`}
-              >
-                <span className="text-3xl" aria-hidden>
-                  {opt.icon}
-                </span>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={step}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+            className="space-y-8 pb-4"
+          >
+            {step === 1 ? (
+              <>
                 <div>
-                  <p className="font-bold text-text-primary">{opt.title}</p>
-                  <p className="text-sm text-text-secondary">{opt.desc}</p>
+                  <h2 className="text-2xl font-bold tracking-tight">Basic info</h2>
+                  <p className="mt-2 text-sm text-[#6B7280]">Tell us a bit about you.</p>
                 </div>
-              </Card>
-            ))}
-          </div>
-        )}
+                <div className="flex gap-4">{genderBtn('male', 'Male')}{genderBtn('female', 'Female')}</div>
+                <div className="space-y-4">
+                  <label className="block space-y-2">
+                    <span className="text-sm text-[#6B7280]">Age</span>
+                    <input
+                      className={fieldInputClass}
+                      inputMode="numeric"
+                      type="number"
+                      min={1}
+                      placeholder="Years"
+                      value={age}
+                      onChange={(e) => setAge(e.target.value)}
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-sm text-[#6B7280]">Weight (kg)</span>
+                    <input
+                      className={fieldInputClass}
+                      inputMode="decimal"
+                      type="number"
+                      min={1}
+                      step="0.1"
+                      placeholder="kg"
+                      value={weight}
+                      onChange={(e) => setWeight(e.target.value)}
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-sm text-[#6B7280]">Height (cm)</span>
+                    <input
+                      className={fieldInputClass}
+                      inputMode="numeric"
+                      type="number"
+                      min={1}
+                      placeholder="cm"
+                      value={height}
+                      onChange={(e) => setHeight(e.target.value)}
+                    />
+                  </label>
+                </div>
+              </>
+            ) : null}
 
-        {step === 3 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Experience</h1>
-              <p className="mt-1 text-sm text-text-secondary">How long have you been lifting?</p>
-            </div>
-            {(
-              [
-                {
-                  id: 'beginner' as const,
-                  title: 'Beginner',
-                  desc: 'Less than 1 year',
-                },
-                {
-                  id: 'intermediate' as const,
-                  title: 'Intermediate',
-                  desc: '1–3 years',
-                },
-                {
-                  id: 'advanced' as const,
-                  title: 'Advanced',
-                  desc: '3+ years',
-                },
-              ] as const
-            ).map((opt) => (
-              <Card
-                key={opt.id}
-                padded
-                onClick={() => setExperience(opt.id)}
-                className={`${selectedCard(experience === opt.id)}`}
-              >
-                <p className="font-bold text-text-primary">{opt.title}</p>
-                <p className="mt-1 text-sm text-text-secondary">{opt.desc}</p>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Training environment</h1>
-              <p className="mt-1 text-sm text-text-secondary">Where do you usually train?</p>
-            </div>
-            {(
-              [
-                {
-                  id: 'gym' as const,
-                  icon: '🏢',
-                  title: 'Gym',
-                  desc: 'Full equipment',
-                },
-                {
-                  id: 'home' as const,
-                  icon: '🏠',
-                  title: 'Home',
-                  desc: 'Dumbbells / basic gear',
-                },
-                {
-                  id: 'bodyweight' as const,
-                  icon: '🤸',
-                  title: 'Bodyweight',
-                  desc: 'No equipment',
-                },
-              ] as const
-            ).map((opt) => (
-              <Card
-                key={opt.id}
-                padded
-                onClick={() => setEnvironment(opt.id)}
-                className={`${selectedCard(environment === opt.id)} flex flex-row items-center gap-4`}
-              >
-                <span className="text-3xl" aria-hidden>
-                  {opt.icon}
-                </span>
+            {step === 2 ? (
+              <>
                 <div>
-                  <p className="font-bold text-text-primary">{opt.title}</p>
-                  <p className="text-sm text-text-secondary">{opt.desc}</p>
+                  <h2 className="text-2xl font-bold tracking-tight">What is your goal?</h2>
+                  <p className="mt-2 text-sm text-[#6B7280]">We&apos;ll tune your plan around this.</p>
                 </div>
-              </Card>
-            ))}
-          </div>
-        )}
+                <div className="grid grid-cols-1 gap-4">
+                  {(
+                    [
+                      { id: 'muscle' as const, label: '💪 Muscle', desc: 'Hypertrophy focused' },
+                      { id: 'strength' as const, label: '🏋️ Strength', desc: 'Powerlifting focus' },
+                      { id: 'weight_loss' as const, label: '🔥 Weight loss', desc: 'Caloric deficit support' },
+                      { id: 'health' as const, label: '❤️ Health', desc: 'General fitness' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setGoal(opt.id)}
+                      className={choiceCard(goal === opt.id)}
+                    >
+                      <div className="text-lg font-bold">{opt.label}</div>
+                      <div className="mt-1 text-sm text-[#6B7280]">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
 
-        {step === 5 && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Injuries</h1>
-              <p className="mt-1 text-sm text-text-secondary">Select any that apply.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {injuryOptions.map((opt) => {
-                const on = injuries.includes(opt.id);
-                return (
+            {step === 3 ? (
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Experience level</h2>
+                  <p className="mt-2 text-sm text-[#6B7280]">How long have you been training?</p>
+                </div>
+                <div className="grid grid-cols-1 gap-4">
+                  {(
+                    [
+                      { id: 'beginner' as const, title: 'Beginner', desc: 'Less than 1 year' },
+                      { id: 'intermediate' as const, title: 'Intermediate', desc: '1–3 years' },
+                      { id: 'advanced' as const, title: 'Advanced', desc: '3+ years' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setExperience(opt.id)}
+                      className={choiceCard(experience === opt.id)}
+                    >
+                      <div className="text-lg font-bold">{opt.title}</div>
+                      <div className="mt-1 text-sm text-[#6B7280]">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {step === 4 ? (
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Training environment</h2>
+                  <p className="mt-2 text-sm text-[#6B7280]">Where do you usually train?</p>
+                </div>
+                <div className="grid grid-cols-1 gap-4">
+                  {(
+                    [
+                      { id: 'gym' as const, label: '🏢 Gym', desc: 'Full equipment' },
+                      { id: 'home' as const, label: '🏠 Home', desc: 'Dumbbells and bench' },
+                      { id: 'bodyweight' as const, label: '🤸 Bodyweight', desc: 'No equipment' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setEnvironment(opt.id)}
+                      className={choiceCard(environment === opt.id)}
+                    >
+                      <div className="text-lg font-bold">{opt.label}</div>
+                      <div className="mt-1 text-sm text-[#6B7280]">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {step === 5 ? (
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Injuries</h2>
+                  <p className="mt-2 text-sm text-[#6B7280]">Select any that apply.</p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {injuryOptions.map((opt) => {
+                    const on = injuries.includes(opt.id);
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => toggleInjury(opt.id)}
+                        className={cx(
+                          'rounded-full border px-6 py-3 text-sm font-semibold transition-all active:scale-[0.98]',
+                          on
+                            ? 'border-[#8B5CF6] bg-[#8B5CF6] text-white'
+                            : 'border-[#2A2A2A] bg-[#1C1C1C] text-white hover:border-[#3F3F3F]',
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                   <button
-                    key={opt.id}
                     type="button"
-                    onClick={() => toggleInjury(opt.id)}
-                    className={`rounded-full border px-4 py-2.5 text-sm font-semibold transition-all active:scale-[0.98] ${
-                      on
-                        ? 'border-accent bg-accent/10 text-accent'
-                        : 'border-border bg-surface text-text-primary'
-                    }`}
+                    onClick={selectNoneInjury}
+                    className={cx(
+                      'rounded-full border px-6 py-3 text-sm font-semibold transition-all active:scale-[0.98]',
+                      noneInjury
+                        ? 'border-[#8B5CF6] bg-[#8B5CF6] text-white'
+                        : 'border-[#2A2A2A] bg-[#1C1C1C] text-white hover:border-[#3F3F3F]',
+                    )}
                   >
-                    {opt.label}
+                    None
                   </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={selectNoneInjury}
-                className={`rounded-full border px-4 py-2.5 text-sm font-semibold transition-all active:scale-[0.98] ${
-                  noneInjury
-                    ? 'border-accent bg-accent/10 text-accent'
-                    : 'border-border bg-surface text-text-primary'
-                }`}
-              >
-                None
-              </button>
-            </div>
-            <p className="text-xs leading-relaxed text-text-secondary">
-              We&apos;ll avoid exercises that stress these areas.
-            </p>
-          </div>
-        )}
+                </div>
+                <p className="text-xs leading-relaxed text-[#6B7280]">We&apos;ll avoid exercises that stress these areas.</p>
+              </>
+            ) : null}
 
-        {step === 6 && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Your working weights (10 reps)</h1>
-              <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-                Skip if you don&apos;t know — we&apos;ll calibrate after first workout
-              </p>
-            </div>
-            <label className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Bench Press (kg)</span>
-              <input
-                className={inputClass}
-                inputMode="decimal"
-                type="number"
-                min={0}
-                step="0.5"
-                placeholder="Optional"
-                value={bench10}
-                onChange={(e) => setBench10(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Squat (kg)</span>
-              <input
-                className={inputClass}
-                inputMode="decimal"
-                type="number"
-                min={0}
-                step="0.5"
-                placeholder="Optional"
-                value={squat10}
-                onChange={(e) => setSquat10(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Deadlift (kg)</span>
-              <input
-                className={inputClass}
-                inputMode="decimal"
-                type="number"
-                min={0}
-                step="0.5"
-                placeholder="Optional"
-                value={deadlift10}
-                onChange={(e) => setDeadlift10(e.target.value)}
-              />
-            </label>
-            <div className="flex flex-col items-center gap-4 pt-2">
-              <Button type="button" variant="link" onClick={skipBenchmarks}>
-                Skip
-              </Button>
-            </div>
-          </div>
-        )}
+            {step === 6 ? (
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Benchmark weights (10 reps)</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-[#6B7280]">
+                    Optional — skip if you don&apos;t know; we&apos;ll calibrate after your first workout.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <label className="block space-y-2">
+                    <span className="text-sm text-[#6B7280]">Bench press (kg)</span>
+                    <input
+                      className={fieldInputClass}
+                      inputMode="decimal"
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      placeholder="Optional"
+                      value={bench10}
+                      onChange={(e) => setBench10(e.target.value)}
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-sm text-[#6B7280]">Squat (kg)</span>
+                    <input
+                      className={fieldInputClass}
+                      inputMode="decimal"
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      placeholder="Optional"
+                      value={squat10}
+                      onChange={(e) => setSquat10(e.target.value)}
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-sm text-[#6B7280]">Deadlift (kg)</span>
+                    <input
+                      className={fieldInputClass}
+                      inputMode="decimal"
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      placeholder="Optional"
+                      value={deadlift10}
+                      onChange={(e) => setDeadlift10(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  onClick={skipBenchmarks}
+                  className="block pt-2 text-sm font-medium text-[#8B5CF6] transition-colors hover:text-[#A78BFA]"
+                >
+                  Skip benchmarks
+                </button>
+              </>
+            ) : null}
 
-        {step === 7 && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary">Training status</h1>
-              <p className="mt-1 text-sm text-text-secondary">This helps tailor volume guidance.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setPharmacology('natural')}
-                className={`rounded-xl border py-4 text-center text-sm font-semibold transition-all ${
-                  pharmacology === 'natural'
-                    ? 'border-accent bg-accent text-white shadow-lg shadow-accent/20'
-                    : 'border-border bg-surface text-text-primary active:scale-[0.98]'
-                }`}
-              >
-                Natural
-              </button>
-              <button
-                type="button"
-                onClick={() => setPharmacology('on_cycle')}
-                className={`rounded-xl border py-4 text-center text-sm font-semibold transition-all ${
-                  pharmacology === 'on_cycle'
-                    ? 'border-accent bg-accent text-white shadow-lg shadow-accent/20'
-                    : 'border-border bg-surface text-text-primary active:scale-[0.98]'
-                }`}
-              >
-                On Cycle
-              </button>
-            </div>
-            {pharmacology === 'on_cycle' && (
-              <div className="flex flex-col gap-4">
-                <label className="flex flex-col gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                    Compound (optional)
-                  </span>
-                  <input
-                    className={inputClass}
-                    type="text"
-                    autoComplete="off"
-                    placeholder="e.g. Testosterone"
-                    value={cycleCompound}
-                    onChange={(e) => setCycleCompound(e.target.value)}
-                  />
-                </label>
-                <label className="flex flex-col gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Start date</span>
-                  <input
-                    className={inputClass}
-                    type="date"
-                    value={cycleStartDate}
-                    onChange={(e) => setCycleStartDate(e.target.value)}
-                  />
-                </label>
-              </div>
-            )}
-            <p className="text-xs leading-relaxed text-text-secondary">Stored locally only, never shared.</p>
-          </div>
-        )}
+            {step === 7 ? (
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Training status</h2>
+                  <p className="mt-2 text-sm text-[#6B7280]">Helps tailor volume and recovery guidance.</p>
+                </div>
+                <div className="flex gap-4">
+                  {pharmaBtn('natural', 'Natural')}
+                  {pharmaBtn('on_cycle', 'On cycle')}
+                </div>
+                {pharmacology === 'on_cycle' ? (
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    <label className="block space-y-2">
+                      <span className="text-sm text-[#6B7280]">Main compound (optional)</span>
+                      <input
+                        className={fieldInputClass}
+                        type="text"
+                        autoComplete="off"
+                        placeholder="e.g. Test E 250mg"
+                        value={cycleCompound}
+                        onChange={(e) => setCycleCompound(e.target.value)}
+                      />
+                    </label>
+                    <label className="block space-y-2">
+                      <span className="text-sm text-[#6B7280]">Cycle start date</span>
+                      <input
+                        className={fieldInputClass}
+                        type="date"
+                        value={cycleStartDate}
+                        onChange={(e) => setCycleStartDate(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                <div className="rounded-xl border border-[#2A2A2A] bg-[#1C1C1C]/50 p-4 text-xs leading-relaxed text-[#6B7280]">
+                  Stored locally only, never shared. Used to adjust recovery recommendations.
+                </div>
+              </>
+            ) : null}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      <div className="shrink-0 border-t border-border bg-bg/95 px-5 py-4 backdrop-blur-md">
-        {step === 7 ? (
-          <Button variant="primary" size="lg" fullWidth disabled={!canContinue()} onClick={() => void finish()}>
-            Let&apos;s Go
-          </Button>
-        ) : (
-          <Button variant="primary" size="lg" fullWidth disabled={!canContinue()} onClick={goNext}>
-            Continue
-          </Button>
-        )}
+      <div className="flex shrink-0 gap-4 border-t border-[#2A2A2A] bg-[#0A0A0A] px-6 py-6">
+        {step > 1 ? (
+          <button
+            type="button"
+            onClick={goBack}
+            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-[#2A2A2A] text-[#6B7280] transition-colors hover:border-[#3F3F3F] hover:text-white"
+            aria-label="Back"
+          >
+            <ChevronLeft className="h-6 w-6" strokeWidth={2} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          disabled={!canContinue()}
+          onClick={step === 7 ? () => void handleComplete() : goNext}
+          className={cx(
+            'flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl bg-[#8B5CF6] py-5 text-base font-bold text-white shadow-lg shadow-[#8B5CF6]/20 transition-all',
+            !canContinue() ? 'cursor-not-allowed opacity-40' : 'active:scale-[0.99] hover:bg-[#7C3AED]',
+          )}
+        >
+          {step === 7 ? "Let's go" : 'Continue'}
+          {step < 7 ? <ChevronRight className="h-5 w-5" strokeWidth={2} /> : null}
+        </button>
       </div>
     </div>
   );
