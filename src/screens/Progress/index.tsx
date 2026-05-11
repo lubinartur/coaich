@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowUpRight, TrendingDown, TrendingUp } from 'lucide-react';
 import { Card } from '@/components/ui';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
 import { canonicalExerciseId } from '@/services/progressionEngine';
 import {
@@ -47,6 +48,7 @@ function formatPct(p: number | null): string {
 const SATURATION_KEYS = ['chest', 'back', 'shoulders', 'legs'] as const;
 
 export default function ProgressScreen() {
+  const { t } = useTranslation();
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -135,9 +137,9 @@ export default function ProgressScreen() {
     return (
       <div className="flex flex-col gap-6 px-6 pb-32 pt-10">
         <header>
-          <h1 className="text-4xl font-black tracking-tighter text-white">Progress</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
         </header>
-        <p className="text-sm text-[#6B7280]">Loading…</p>
+        <p className="text-sm text-[#6B7280]">{t('loading')}</p>
       </div>
     );
   }
@@ -146,12 +148,12 @@ export default function ProgressScreen() {
     return (
       <div className="flex flex-col gap-6 px-6 pb-32 pt-10">
         <header>
-          <h1 className="text-4xl font-black tracking-tighter text-white">Progress</h1>
-          <p className="mt-1 font-medium tracking-tight text-[#6B7280]">Your progress over time</p>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
+          <p className="mt-1 font-medium tracking-tight text-[#6B7280]">{t('yourProgressOverTime')}</p>
         </header>
         <Card className="border-[#2A2A2A] bg-[#1C1C1C] py-10 text-center">
           <p className="text-sm font-medium leading-relaxed text-[#6B7280]">
-            Complete your first workout to see progress
+            {t('completeFirstWorkoutToSeeProgress')}
           </p>
         </Card>
       </div>
@@ -166,9 +168,9 @@ export default function ProgressScreen() {
   const overallTrendFlat = overallPct !== null && overallPct === 0;
 
   const SPLIT_LABEL: Record<SplitKey, string> = {
-    push: 'PUSH',
-    pull: 'PULL',
-    legs: 'LEGS',
+    push: t('push').toUpperCase(),
+    pull: t('pull').toUpperCase(),
+    legs: t('legs').toUpperCase(),
   };
 
   const saturationRows = SATURATION_KEYS.map((k) => volumeRows.find((r) => r.key === k)).filter(
@@ -178,15 +180,15 @@ export default function ProgressScreen() {
   return (
     <div className="animate-in fade-in space-y-12 px-6 pb-32 pt-10 duration-700">
       <header>
-        <h1 className="text-4xl font-black tracking-tighter text-white">Progress</h1>
-        <p className="mt-1 font-medium tracking-tight text-[#6B7280]">Your progress over time</p>
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
+        <p className="mt-1 font-medium tracking-tight text-[#6B7280]">{t('yourProgressOverTime')}</p>
       </header>
 
       <section className="relative overflow-hidden rounded-[32px] border border-white/5 bg-[#141414]/80 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.98]">
         <div className="relative z-10">
           <div className="mb-2 text-center">
             <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
-              Current Strength Index
+              {t('currentStrengthIndex')}
             </h3>
           </div>
 
@@ -240,7 +242,7 @@ export default function ProgressScreen() {
         <section className="space-y-6">
           <div>
             <h3 className="text-left text-sm font-black uppercase tracking-widest text-[#6B7280]">
-              Benchmark Lifts
+              {t('benchmarkLifts')}
             </h3>
           </div>
           <div className="flex flex-col gap-10">
@@ -259,7 +261,7 @@ export default function ProgressScreen() {
                       <span className="text-4xl font-black tabular-nums tracking-tighter text-white">
                         {lift.displayKg}
                       </span>
-                      <span className="text-sm text-[#6B7280]">kg</span>
+                      <span className="text-sm text-[#6B7280]">{t('kgUnit')}</span>
                     </div>
                     {showDeltaBadge ? (
                       <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/10 px-2 py-1">
@@ -285,7 +287,7 @@ export default function ProgressScreen() {
 
       <section className="space-y-6 pt-4">
         <h3 className="px-2 text-center text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
-          Weekly Saturation
+          {t('weeklySaturation')}
         </h3>
         <div className="grid grid-cols-2 gap-4">
           {saturationRows.map((v) => {
@@ -299,7 +301,7 @@ export default function ProgressScreen() {
                   <span className="mb-2 text-[9px] font-black tracking-widest text-[#6B7280]">{v.label}</span>
                   <span className="text-2xl font-black tracking-tight text-white">{fillPct}%</span>
                   <span className="mt-1 text-[9px] font-bold uppercase text-[#6B7280]">
-                    {v.sets} / {maxVol} sets
+                    {v.sets} / {maxVol} {t('setsUnit')}
                   </span>
                 </div>
                 <div className="absolute inset-0 z-0">

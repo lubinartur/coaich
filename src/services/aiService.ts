@@ -157,36 +157,53 @@ type ParsedReviewShape = Omit<AIReview, 'id' | 'sessionId' | 'generatedAt' | 'ne
   exerciseNotes: ExerciseNoteRaw[];
 };
 
+function emptyParsedReview(intro = ''): ParsedReviewShape {
+  return {
+    intro,
+    wentWell: [],
+    toImprove: [],
+    nextTargets: [],
+    exerciseNotes: [],
+  };
+}
+
+function stripJsonMarkers(rawText: string): string {
+  return rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
+function looksLikeJsonText(rawText: string): boolean {
+  const clean = stripJsonMarkers(rawText);
+  return clean.startsWith('{') || clean.startsWith('[');
+}
+
+function parseReviewResponseInternal(rawText: string, depth = 0): ParsedReviewShape | null {
+  if (depth > 3) return null;
+  const clean = stripJsonMarkers(rawText);
+  const parsed = JSON.parse(clean) as unknown;
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+  const o = parsed as Record<string, unknown>;
+  const introRaw = typeof o.intro === 'string' ? o.intro : String(o.intro ?? '');
+  if (introRaw && looksLikeJsonText(introRaw)) {
+    const nested = parseReviewResponseInternal(introRaw, depth + 1);
+    if (nested) return nested;
+  }
+  return {
+    intro: introRaw,
+    wentWell: Array.isArray(o.wentWell) ? o.wentWell.map((x) => String(x)) : [],
+    toImprove: Array.isArray(o.toImprove) ? o.toImprove.map((x) => String(x)) : [],
+    nextTargets: Array.isArray(o.nextTargets) ? (o.nextTargets as ParsedReviewShape['nextTargets']) : [],
+    exerciseNotes: Array.isArray(o.exerciseNotes) ? (o.exerciseNotes as ExerciseNoteRaw[]) : [],
+  };
+}
+
 const parseReviewResponse = (rawText: string): ParsedReviewShape => {
   try {
-    const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(clean) as unknown;
-    if (!parsed || typeof parsed !== 'object') {
-      return {
-        intro: rawText,
-        wentWell: [],
-        toImprove: [],
-        nextTargets: [],
-        exerciseNotes: [],
-      };
-    }
-    const o = parsed as Record<string, unknown>;
-    return {
-      intro: typeof o.intro === 'string' ? o.intro : String(o.intro ?? ''),
-      wentWell: Array.isArray(o.wentWell) ? o.wentWell.map((x) => String(x)) : [],
-      toImprove: Array.isArray(o.toImprove) ? o.toImprove.map((x) => String(x)) : [],
-      nextTargets: Array.isArray(o.nextTargets) ? (o.nextTargets as ParsedReviewShape['nextTargets']) : [],
-      exerciseNotes: Array.isArray(o.exerciseNotes) ? (o.exerciseNotes as ExerciseNoteRaw[]) : [],
-    };
+    return parseReviewResponseInternal(rawText) ?? emptyParsedReview(rawText);
   } catch (err) {
     console.error('Failed to parse AI review:', err);
-    return {
-      intro: rawText,
-      wentWell: [],
-      toImprove: [],
-      nextTargets: [],
-      exerciseNotes: [],
-    };
+    return emptyParsedReview(rawText);
   }
 };
 

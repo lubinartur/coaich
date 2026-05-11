@@ -22,15 +22,16 @@ import {
   previewExerciseTarget,
   type ProgressionStatus,
 } from '@/services/progressionEngine';
+import { useTranslation } from '@/hooks/useTranslation';
 import type { Exercise, Profile } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
 
 const QUICK_PROGRAMS = [
-  { name: 'Push', emoji: '🔥', program: 'push' as const },
-  { name: 'Pull', emoji: '🧗', program: 'pull' as const },
-  { name: 'Legs', emoji: '🦵', program: 'legs' as const },
-  { name: 'Full Body', emoji: '🏋️', program: 'full_body' as const },
-  { name: 'Custom', emoji: '✨', program: 'custom' as const },
+  { emoji: '🔥', program: 'push' as const },
+  { emoji: '🧗', program: 'pull' as const },
+  { emoji: '🦵', program: 'legs' as const },
+  { emoji: '🏋️', program: 'full_body' as const },
+  { emoji: '✨', program: 'custom' as const },
 ];
 
 type TodayExerciseRow = {
@@ -87,21 +88,8 @@ function getTodayStatusBadge(status: ProgressionStatus): TodayStatusBadge {
   }
 }
 
-const FOCUS_SUBTITLE: Record<RecommendedWorkoutType, string> = {
-  push: 'Chest, shoulders & triceps',
-  pull: 'Back & biceps',
-  legs: 'Legs, glutes & core',
-  full_body: 'Full body',
-};
-
-function operationLabel(type: RecommendedWorkoutType | null): string {
-  if (!type) return '…';
-  if (type === 'full_body') return 'FULL BODY';
-  return type.toUpperCase();
-}
-
-function missionDateSubtitle(): string {
-  return new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+function missionDateSubtitle(locale: string): string {
+  return new Date().toLocaleDateString(locale, { month: 'long', day: 'numeric' });
 }
 
 /** Split coach copy on ". " so each sentence can be spaced; preserves final segment without forcing a period. */
@@ -127,6 +115,7 @@ export interface TodayScreenProps {
 }
 
 export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
+  const { t, locale } = useTranslation();
   const [rows, setRows] = useState<TodayExerciseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [reco, setReco] = useState<WorkoutRecommendation | null>(null);
@@ -144,10 +133,71 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     setExpandedExerciseIds([]);
   }, [rows]);
 
+  const getProgramLabel = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
+    switch (program) {
+      case 'push':
+        return t('push');
+      case 'pull':
+        return t('pull');
+      case 'legs':
+        return t('legs');
+      case 'full_body':
+        return t('fullBody');
+      default:
+        return t('custom');
+    }
+  };
+
+  const getWorkoutNameForProgram = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
+    switch (program) {
+      case 'push':
+        return t('pushWorkoutName');
+      case 'pull':
+        return t('pullWorkoutName');
+      case 'legs':
+        return t('legsWorkoutName');
+      case 'full_body':
+        return t('fullBodyWorkoutName');
+      default:
+        return t('customWorkoutName');
+    }
+  };
+
+  const getFocusSubtitle = (type: RecommendedWorkoutType) => {
+    switch (type) {
+      case 'push':
+        return t('focusPush');
+      case 'pull':
+        return t('focusPull');
+      case 'legs':
+        return t('focusLegs');
+      default:
+        return t('focusFullBody');
+    }
+  };
+
+  const getOperationLabel = (type: RecommendedWorkoutType | null) => {
+    if (!type) return '…';
+    return getProgramLabel(type).toUpperCase();
+  };
+
+  const getBadgeLabel = (label: TodayStatusBadge['label']) => {
+    switch (label) {
+      case 'HOLD':
+        return t('statusHold');
+      case 'BASE':
+        return t('statusBase');
+      case 'DELOAD':
+        return t('statusDeload');
+      default:
+        return t('statusRec');
+    }
+  };
+
   const startQuickProgram = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
     if (program === 'custom') {
       onStartWorkout?.({
-        workoutName: 'Custom Workout',
+        workoutName: getWorkoutNameForProgram('custom'),
         workoutType: 'custom',
         exerciseTemplate: EMPTY_WORKOUT_TEMPLATE,
         openExercisePickerOnMount: true,
@@ -156,22 +206,22 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     }
     const map = {
       push: {
-        workoutName: 'Push - Chest & Shoulders',
+        workoutName: getWorkoutNameForProgram('push'),
         workoutType: 'push',
         template: WORKOUT_PROGRAM_TEMPLATES.push,
       },
       pull: {
-        workoutName: 'Pull - Back & Biceps',
+        workoutName: getWorkoutNameForProgram('pull'),
         workoutType: 'pull',
         template: WORKOUT_PROGRAM_TEMPLATES.pull,
       },
       legs: {
-        workoutName: 'Legs - Quads & Hamstrings',
+        workoutName: getWorkoutNameForProgram('legs'),
         workoutType: 'legs',
         template: WORKOUT_PROGRAM_TEMPLATES.legs,
       },
       full_body: {
-        workoutName: 'Full Body',
+        workoutName: getWorkoutNameForProgram('full_body'),
         workoutType: 'full_body',
         template: WORKOUT_PROGRAM_TEMPLATES.full_body,
       },
@@ -232,7 +282,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                         target.sets,
                         ex.equipment,
                       )
-                    : 'First session',
+                    : t('firstSession'),
                   last: last ?? '—',
                   progressionStatus: preview?.progressionStatus ?? 'first_session',
                 };
@@ -242,7 +292,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                   exerciseId: ex.exerciseId,
                   name: ex.name,
                   equipment: ex.equipment,
-                  rec: 'First session',
+                  rec: t('firstSession'),
                   last: '—',
                   progressionStatus: 'first_session' as const,
                 };
@@ -254,11 +304,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         if (!profile) {
           setReco({
             workoutType: 'push',
-            workoutName: 'Push - Chest & Shoulders',
-            reasoning: 'Complete onboarding to unlock personalized coaching.',
+            workoutName: t('pushWorkoutName'),
+            reasoning: t('completeOnboarding'),
           });
           setRows([]);
-          setCoachAiMessage('Complete onboarding to unlock personalized coaching.');
+          setCoachAiMessage(t('completeOnboarding'));
           setCoachAiLoading(false);
           setLoading(false);
           return;
@@ -312,10 +362,10 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         if (!cancelled) {
           setReco({
             workoutType: 'push',
-            workoutName: 'Push - Chest & Shoulders',
-            reasoning: 'Could not load your history — defaulting to push. Pull to refresh later.',
+            workoutName: t('pushWorkoutName'),
+            reasoning: t('historyFallback'),
           });
-          setCoachAiMessage('Could not load your history — defaulting to push. Pull to refresh later.');
+          setCoachAiMessage(t('historyFallback'));
           setCoachAiLoading(false);
           const fallback = WORKOUT_PROGRAM_TEMPLATES.push;
           setRows(
@@ -323,7 +373,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
               exerciseId: ex.exerciseId,
               name: ex.name,
               equipment: ex.equipment,
-              rec: 'First session',
+              rec: t('firstSession'),
               last: '—',
               progressionStatus: 'first_session' as const,
             })),
@@ -336,7 +386,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, t]);
 
   let displayWorkoutType: RecommendedWorkoutType | null = null;
   let displayWorkoutName = '';
@@ -359,17 +409,15 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
 
   /** Short card title from recommendation (e.g. "Pull" from "Pull - Back & Biceps"), never goal labels. */
   const workoutCardTitle =
-    displayWorkoutName.length > 0
+    displayWorkoutType != null
+      ? getProgramLabel(displayWorkoutType)
+      : displayWorkoutName.length > 0
       ? (() => {
           const i = displayWorkoutName.indexOf(' - ');
           const raw = i === -1 ? displayWorkoutName : displayWorkoutName.slice(0, i);
           return toDisplayName(raw);
         })()
-      : displayWorkoutType
-        ? displayWorkoutType === 'full_body'
-          ? 'Full body'
-          : toDisplayName(displayWorkoutType)
-        : '';
+      : '';
 
   return (
     <motion.div
@@ -381,15 +429,15 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
       {/* Header */}
       <header className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="text-4xl font-black tracking-tighter text-white">Today</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('today')}</h1>
           <p className="mt-1 text-sm font-medium tracking-tight text-[#6B7280]">
-            The mission for {missionDateSubtitle()}
+            {t('missionFor')} {missionDateSubtitle(locale)}
           </p>
         </div>
         <button
           type="button"
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 shadow-[0_0_24px_-4px_rgba(139,92,246,0.35)] transition-transform active:scale-95"
-          aria-label="Refresh recommendation"
+          aria-label={t('refreshRecommendation')}
           onClick={() => setRefreshKey((k) => k + 1)}
         >
           <Zap className="h-6 w-6 text-[#8B5CF6]" fill="currentColor" aria-hidden />
@@ -403,7 +451,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
             <Sparkles className="h-2.5 w-2.5 text-white" fill="currentColor" strokeWidth={3} aria-hidden />
           </div>
           <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8B5CF6]">
-            COAICH INTELLIGENCE
+            {t('coachIntelligence')}
           </span>
         </div>
         {coachAiLoading ? (
@@ -433,13 +481,13 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                 className="relative z-10 mt-3 text-sm font-medium text-[#8B5CF6] underline decoration-[#8B5CF6]/40 underline-offset-2 hover:opacity-90"
                 onClick={() => setCoachMessageExpanded((v) => !v)}
               >
-                {coachMessageExpanded ? 'Read less' : 'Read more'}
+                {coachMessageExpanded ? t('readLess') : t('readMore')}
               </button>
             ) : null}
           </>
         ) : (
           <p className="relative z-10 text-lg font-medium leading-tight tracking-tight text-white/90">
-            {loading ? 'Building your recommendation…' : '—'}
+            {loading ? t('buildingRecommendation') : '—'}
           </p>
         )}
         <div
@@ -454,27 +502,20 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-2 rounded-md border border-[#333333] bg-[#222222] px-2 py-1">
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8B5CF6]" />
-                  <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                    Operation: {operationLabel(displayWorkoutType)}
-                  </span>
-                </div>
+                {!isRestRecommended ? (
+                  <div className="inline-flex items-center gap-2 rounded-md border border-[#333333] bg-[#222222] px-2 py-1">
+                    <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8B5CF6]" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                      {t('operation')}: {getOperationLabel(displayWorkoutType)}
+                    </span>
+                  </div>
+                ) : null}
                 {reco?.isDeload ? (
                   <>
-                    {isRestRecommended ? (
-                      <span className="rounded-md border border-[#2A2A2A] bg-[#141414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                        Rest recommended
-                      </span>
-                    ) : null}
                     <span className="rounded-md border border-[#60A5FA]/30 bg-[#60A5FA]/15 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#60A5FA]">
-                      Deload week
+                      {t('deloadWeek')}
                     </span>
                   </>
-                ) : isRestRecommended ? (
-                  <span className="rounded-md border border-[#2A2A2A] bg-[#141414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                    Rest recommended
-                  </span>
                 ) : null}
               </div>
               <h2 className="text-4xl font-black tracking-tighter text-white">
@@ -483,9 +524,9 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
               <p className="mt-1 text-sm font-medium text-[#6B7280]">
                 {displayWorkoutType
                   ? reco?.isDeload
-                    ? '50% volume — same weights, half the sets'
-                    : `${FOCUS_SUBTITLE[displayWorkoutType]} • ${WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType].length} exercises`
-                  : 'Loading…'}
+                    ? t('deloadSubtitle')
+                    : `${getFocusSubtitle(displayWorkoutType)} • ${WORKOUT_PROGRAM_TEMPLATES[displayWorkoutType].length} ${t('exercises').toLowerCase()}`
+                  : t('loading')}
               </p>
             </div>
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#8B5CF6] shadow-lg shadow-[#8B5CF6]/30">
@@ -495,7 +536,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
 
           <div className="pt-1">
             {loading ? (
-              <p className="py-3 text-sm text-[#6B7280]">Loading targets…</p>
+              <p className="py-3 text-sm text-[#6B7280]">{t('loadingTargets')}</p>
             ) : displayRows.length > 0 ? (
               <>
                 <div className="space-y-2">
@@ -526,7 +567,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                                 }`}
                                 aria-hidden
                               />
-                              {badge.label}
+                              {getBadgeLabel(badge.label)}
                             </span>
                           </div>
                         </button>
@@ -535,9 +576,9 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                             {parsedTarget ? (
                               <>
                                 <div className="mb-2 grid grid-cols-[42px_minmax(0,1fr)_64px] gap-2 text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                                  <span>Set</span>
-                                  <span className="text-center">Weight</span>
-                                  <span className="text-right">{isTimedTarget ? 'Time' : 'Reps'}</span>
+                                  <span>{t('set')}</span>
+                                  <span className="text-center">{t('weight')}</span>
+                                  <span className="text-right">{isTimedTarget ? t('time') : t('reps')}</span>
                                 </div>
                                 <div className="space-y-2">
                                   {Array.from({ length: parsedTarget.sets }, (_, idx) => (
@@ -545,19 +586,23 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                                       key={`${ex.exerciseId}-target-${idx + 1}`}
                                       className="grid grid-cols-[42px_minmax(0,1fr)_64px] items-center gap-2"
                                     >
-                                      <span className="text-xs text-[#6B7280]">SET {idx + 1}</span>
+                                      <span className="text-xs text-[#6B7280]">
+                                        {t('set')} {idx + 1}
+                                      </span>
                                       <span className="text-center text-sm font-medium text-white">
-                                        {ex.equipment === 'bodyweight' ? 'Bodyweight' : `${parsedTarget.weight}kg`}
+                                        {ex.equipment === 'bodyweight'
+                                          ? t('bodyweight')
+                                          : `${parsedTarget.weight}${t('kgUnit')}`}
                                       </span>
                                       <span className="text-right text-sm font-medium text-[#8B5CF6]">
-                                        {isTimedTarget ? `${parsedTarget.reps}s` : parsedTarget.reps}
+                                        {isTimedTarget ? `${parsedTarget.reps}${t('secShort')}` : parsedTarget.reps}
                                       </span>
                                     </div>
                                   ))}
                                 </div>
                               </>
                             ) : (
-                              <p className="text-sm text-[#6B7280]">Targets will appear after your first workout.</p>
+                              <p className="text-sm text-[#6B7280]">{t('targetsWillAppear')}</p>
                             )}
                           </div>
                         ) : null}
@@ -581,7 +626,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
               onClick={() => {
                 if (!reco || displayWorkoutType === null) return;
                 const workoutName =
-                  reco.workoutType !== null ? reco.workoutName : reco.trainAnywayName ?? reco.workoutName;
+                  displayWorkoutType != null
+                    ? getWorkoutNameForProgram(displayWorkoutType)
+                    : reco.workoutType !== null
+                      ? reco.workoutName
+                      : reco.trainAnywayName ?? reco.workoutName;
                 onStartWorkout?.({
                   workoutName,
                   workoutType: displayWorkoutType,
@@ -590,7 +639,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                 });
               }}
             >
-              Start Workout
+              {t('deployWorkout')}
               <ArrowRight
                 className="h-[18px] w-[18px] transition-transform group-hover:translate-x-1 group-disabled:translate-x-0"
                 aria-hidden
@@ -603,12 +652,14 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
       {/* Tactical templates — 2×2 style grid */}
       <section className="space-y-4">
         <div className="flex items-center justify-between px-2">
-          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">Tactical Templates</h3>
+          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+            {t('tacticalTemplates')}
+          </h3>
         </div>
         <div className="grid grid-cols-2 gap-3">
           {QUICK_PROGRAMS.map((prog, idx) => (
             <button
-              key={prog.name}
+              key={prog.program}
               type="button"
               onClick={() => startQuickProgram(prog.program)}
               className={`relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-[#222222] p-5 text-left transition-all active:scale-[0.98] ${
@@ -619,9 +670,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                 {prog.emoji}
               </span>
               <div className="relative z-10">
-                <span className="block text-lg font-black tracking-tight text-white">{prog.name}</span>
+                <span className="block text-lg font-black tracking-tight text-white">
+                  {getProgramLabel(prog.program)}
+                </span>
                 <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
-                  Quick start
+                  {t('quickStart')}
                 </span>
               </div>
               <Dumbbell

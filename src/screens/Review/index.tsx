@@ -9,6 +9,7 @@ import {
   Sparkles,
   Trophy,
 } from 'lucide-react';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
 import { canonicalExerciseId } from '@/services/progressionEngine';
 import type { AIReview, PrRecord, WorkoutSession } from '@/types';
@@ -25,27 +26,20 @@ export interface ReviewScreenProps {
   dataRefreshKey?: number;
 }
 
-function formatDurationMinutes(totalMinutes: number): string {
+function formatDurationMinutes(totalMinutes: number, hourShort: string, minuteShort: string): string {
   const m = Math.max(0, Math.round(totalMinutes));
   const h = Math.floor(m / 60);
   const min = m % 60;
-  if (h > 0) return `${h}h ${min.toString().padStart(2, '0')}m`;
-  return `${min}m`;
+  if (h > 0) return `${h}${hourShort} ${min.toString().padStart(2, '0')}${minuteShort}`;
+  return `${min}${minuteShort}`;
 }
 
 type StatTile = { label: string; value: string };
 
-const STATS_PLACEHOLDER: StatTile[] = [
-  { label: 'VOLUME (kg)', value: '420' },
-  { label: 'SETS', value: '18' },
-  { label: 'EXERCISES', value: '6' },
-  { label: 'DURATION', value: '1h 05m' },
-];
-
 /** Stats grid only: always kg, comma thousands when ≥ 1000. */
-function formatStatVolumeKg(volKg: number): string {
+function formatStatVolumeKg(volKg: number, locale: string): string {
   const rounded = Math.round(volKg);
-  return rounded >= 1000 ? rounded.toLocaleString('en-US') : String(rounded);
+  return rounded >= 1000 ? rounded.toLocaleString(locale) : String(rounded);
 }
 
 const LOG_EXERCISES = [
@@ -79,8 +73,32 @@ function exerciseVolumeKg(sets: { w: number; r: number; completed: boolean }[]):
   return sets.filter((s) => s.completed).reduce((a, s) => a + s.w * s.r, 0);
 }
 
-function formatVolumeDisplay(volKg: number): string {
-  return `${Math.round(volKg).toLocaleString('en-US')}kg`;
+function formatVolumeDisplay(volKg: number, locale: string, kgUnit: string): string {
+  return `${Math.round(volKg).toLocaleString(locale)}${kgUnit}`;
+}
+
+function stripJsonMarkers(rawText: string): string {
+  return rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
+function extractReviewIntro(rawText: string, depth = 0): string {
+  const trimmed = rawText.trim();
+  if (!trimmed) return rawText;
+  if (depth > 3) return stripJsonMarkers(trimmed);
+  const clean = stripJsonMarkers(trimmed);
+  if (!clean.startsWith('{')) return rawText;
+  try {
+    const parsed = JSON.parse(clean) as unknown;
+    if (parsed && typeof parsed === 'object' && 'intro' in parsed) {
+      const intro = (parsed as { intro?: unknown }).intro;
+      if (typeof intro === 'string') {
+        return extractReviewIntro(intro, depth + 1);
+      }
+    }
+    return rawText;
+  } catch {
+    return rawText;
+  }
 }
 
 const SECTION_HEADER_CLASS = 'text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]';
@@ -94,19 +112,19 @@ const PR_VALUE_CLASS = 'text-sm text-[#F59E0B]';
 const NOTE_INDEX_CLASS = 'text-sm font-black text-[#8B5CF6]';
 
 /** PR row title — same display name rules as session rows. */
-function prDisplayName(r: PrRecord): string {
-  return toDisplayName((r.exerciseName ?? '').trim() || 'Exercise');
+function prDisplayName(r: PrRecord, fallbackExercise: string): string {
+  return toDisplayName((r.exerciseName ?? '').trim() || fallbackExercise);
 }
 
 /** PR row subtitle: `77.5kg × 8` or `12 reps` (same rules as prDetection `formatPrLine`). */
-function prWeightSubtitle(r: PrRecord): string {
+function prWeightSubtitle(r: PrRecord, kgUnit: string, repsLabel: string): string {
   const w = r.weight;
   const reps = r.reps;
   if (w > 0) {
     const ws = Number.isInteger(w) ? String(w) : w.toFixed(1).replace(/\.0$/, '');
-    return `${ws}kg × ${reps}`;
+    return `${ws}${kgUnit} × ${reps}`;
   }
-  return `${reps} reps`;
+  return `${reps} ${repsLabel}`;
 }
 
 export default function ReviewScreen({
@@ -117,6 +135,7 @@ export default function ReviewScreen({
   onEditWorkout,
   dataRefreshKey = 0,
 }: ReviewScreenProps) {
+  const { t, lang, locale } = useTranslation();
   const [expandedLogKeys, setExpandedLogKeys] = useState<string[]>([]);
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [prRecords, setPrRecords] = useState<PrRecord[]>([]);
@@ -189,27 +208,32 @@ export default function ReviewScreen({
         );
         name = (ex?.exerciseName ?? '').trim();
       }
-      return name || 'Exercise';
+      return name || t('exercise');
     };
     return [...prRecords]
       .map((r) => ({ ...r, exerciseName: resolveName(r) }))
       .sort((a, b) => a.exerciseName.localeCompare(b.exerciseName));
-  }, [prRecords, session]);
+  }, [prRecords, session, t]);
 
   const displayStats = useMemo((): StatTile[] => {
     if (!session) {
-      return STATS_PLACEHOLDER;
+      return [
+        { label: t('volume'), value: '420' },
+        { label: t('sets'), value: '18' },
+        { label: t('exercises'), value: '6' },
+        { label: t('duration'), value: formatDurationMinutes(65, t('hourShort'), t('minuteShort')) },
+      ];
     }
     const setCount = session.exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
     const volKg = session.totalVolume;
     const durMin = Math.max(0, Math.round(session.durationMinutes));
     return [
-      { label: 'VOLUME (kg)', value: formatStatVolumeKg(volKg) },
-      { label: 'SETS', value: String(setCount) },
-      { label: 'EXERCISES', value: String(session.exercises.length) },
-      { label: 'DURATION', value: formatDurationMinutes(durMin) },
+      { label: t('volume'), value: formatStatVolumeKg(volKg, locale) },
+      { label: t('sets'), value: String(setCount) },
+      { label: t('exercises'), value: String(session.exercises.length) },
+      { label: t('duration'), value: formatDurationMinutes(durMin, t('hourShort'), t('minuteShort')) },
     ];
-  }, [session]);
+  }, [locale, session, t]);
 
   const logExercises = useMemo(() => {
     if (!session) {
@@ -238,17 +262,6 @@ export default function ReviewScreen({
   return (
     <div className="min-h-screen w-full animate-in fade-in slide-in-from-bottom-8 bg-[#0A0A0A] pb-24 duration-700">
       <header className="sticky top-0 z-10 border-b border-[#2A2A2A] bg-[#0A0A0A]/80 px-6 pb-6 pt-6 backdrop-blur-xl">
-        <div className="mb-8 flex items-center justify-end">
-          {sessionId && onEditWorkout ? (
-            <button
-              type="button"
-              onClick={onEditWorkout}
-              className="rounded-xl border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-[#8B5CF6] shadow-[0_0_20px_rgba(139,92,246,0.15)]"
-            >
-              Edit Session
-            </button>
-          ) : null}
-        </div>
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <div className="h-1.5 w-1.5 rounded-full bg-[#8B5CF6]" aria-hidden />
@@ -289,7 +302,7 @@ export default function ReviewScreen({
               <div className="rounded-lg bg-[#F59E0B] p-1.5 shadow-lg shadow-[#F59E0B]/20">
                 <Trophy className="h-4 w-4 fill-black text-black" aria-hidden />
               </div>
-              <h3 className={SECTION_HEADER_CLASS}>Personal Records</h3>
+              <h3 className={SECTION_HEADER_CLASS}>{t('personalRecords')}</h3>
             </div>
             <div className="divide-y divide-[#F59E0B]/15">
               {prRecordsForDisplay.map((r) => (
@@ -297,8 +310,8 @@ export default function ReviewScreen({
                   key={r.id ?? `${r.exerciseId}-${r.achievedAt}`}
                   className="py-3 first:pt-0 last:pb-0"
                 >
-                  <p className={EXERCISE_NAME_CLASS}>{prDisplayName(r)}</p>
-                  <p className={`mt-1 ${PR_VALUE_CLASS}`}>{prWeightSubtitle(r)}</p>
+                  <p className={EXERCISE_NAME_CLASS}>{prDisplayName(r, t('exercise'))}</p>
+                  <p className={`mt-1 ${PR_VALUE_CLASS}`}>{prWeightSubtitle(r, t('kgUnit'), t('reps').toLowerCase())}</p>
                 </div>
               ))}
             </div>
@@ -314,9 +327,9 @@ export default function ReviewScreen({
               AI
             </div>
             <div>
-              <h3 className="text-2xl font-black uppercase tracking-tight text-white">Coach Analysis</h3>
+              <h3 className="text-2xl font-black uppercase tracking-tight text-white">{t('coachAnalysis')}</h3>
               <p className="text-[10px] uppercase tracking-widest text-[#6B7280]">
-                Post-Session Intelligence
+                {t('postSessionIntelligence')}
               </p>
             </div>
           </div>
@@ -328,18 +341,18 @@ export default function ReviewScreen({
               <div className="h-2 w-[80%] animate-pulse rounded-full bg-[#111111]" />
             </div>
           ) : sessionId && !coachReview ? (
-            <p className={`px-2 ${BODY_TEXT_CLASS}`}>No AI review for this workout.</p>
+            <p className={`px-2 ${BODY_TEXT_CLASS}`}>{t('noAiReview')}</p>
           ) : coachReview ? (
             <div className="space-y-10 px-2">
               <p className={BODY_TEXT_CLASS}>
-                {coachReview.intro}
+                {extractReviewIntro(coachReview.intro)}
               </p>
 
               <div className="grid grid-cols-1 gap-12">
                 <div className="space-y-4">
                   <div className={`flex items-center gap-2 ${SECTION_HEADER_CLASS}`}>
                     <CheckCircle2 className="h-3 w-3 text-[#22C55E]" strokeWidth={3} aria-hidden />
-                    What went well
+                    {t('whatWentWell')}
                   </div>
                   <div className="space-y-3">
                     {coachReview.wentWell.map((p, i) => (
@@ -356,7 +369,7 @@ export default function ReviewScreen({
                 <div className="space-y-4">
                   <div className={`flex items-center gap-2 ${SECTION_HEADER_CLASS}`}>
                     <AlertCircle className="h-3 w-3 text-[#F59E0B]" strokeWidth={3} aria-hidden />
-                    To improve
+                    {t('toImprove')}
                   </div>
                   <div className="space-y-3">
                     {coachReview.toImprove.map((p, i) => (
@@ -375,7 +388,7 @@ export default function ReviewScreen({
                 <div className="space-y-4">
                   <div className={`flex items-center gap-2 ${SECTION_HEADER_CLASS}`}>
                     <MessageSquare className="h-3 w-3 text-[#8B5CF6]" strokeWidth={3} aria-hidden />
-                    Exercise notes
+                    {t('exerciseNotes')}
                   </div>
                   <div className="space-y-3">
                     {coachReview.exerciseNotes.map((block, i) => (
@@ -384,7 +397,7 @@ export default function ReviewScreen({
                           {String(i + 1).padStart(2, '0')}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className={EXERCISE_NAME_CLASS}>{toDisplayName(block.exerciseName || 'Exercise')}</p>
+                          <p className={EXERCISE_NAME_CLASS}>{toDisplayName(block.exerciseName || t('exercise'))}</p>
                           <p className={`mt-1 ${BODY_TEXT_CLASS}`}>{block.note}</p>
                         </div>
                       </div>
@@ -394,18 +407,18 @@ export default function ReviewScreen({
               ) : null}
             </div>
           ) : (
-            <p className={`px-2 ${BODY_TEXT_CLASS}`}>No AI review for this workout.</p>
+            <p className={`px-2 ${BODY_TEXT_CLASS}`}>{t('noAiReview')}</p>
           )}
         </section>
 
         <section className="space-y-6">
           <h3 className={`px-2 text-center ${SECTION_HEADER_CLASS}`}>
-            Exercise log
+            {t('exerciseLog')}
           </h3>
           <div className="space-y-4">
             {logExercises.map((ex) => {
               const completed = ex.sets.filter((s) => s.completed);
-              const volDisp = formatVolumeDisplay(exerciseVolumeKg(ex.sets));
+              const volDisp = formatVolumeDisplay(exerciseVolumeKg(ex.sets), locale, t('kgUnit'));
               const open = expandedLogKeys.includes(ex.key);
               return (
                 <div key={ex.key} className="overflow-hidden rounded-[32px] border border-[#222222] bg-[#111111]">
@@ -419,7 +432,7 @@ export default function ReviewScreen({
                         {toDisplayName(ex.name)}
                       </div>
                       <div className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
-                        {completed.length} sets • {volDisp}
+                        {completed.length} {t('setsUnit')} • {volDisp}
                       </div>
                     </div>
                     <div className="rounded-full bg-[#222222] p-2 transition-all group-hover:bg-[#8B5CF6]/20 group-hover:text-[#8B5CF6]">
@@ -437,18 +450,20 @@ export default function ReviewScreen({
                       >
                         <div className="space-y-4 border-t border-white/5 px-6 pb-6 pt-4">
                           <div className={`mb-2 grid grid-cols-3 gap-2 px-2 ${STAT_CARD_LABEL_CLASS}`}>
-                            <span>Set</span>
-                            <span className="text-center">Weight</span>
-                            <span className="text-right">Reps</span>
+                            <span>{t('set')}</span>
+                            <span className="text-center">{t('weight')}</span>
+                            <span className="text-right">{t('reps')}</span>
                           </div>
                           {completed.map((s, idx) => (
                             <div key={s.n} className="grid grid-cols-3 items-center gap-2 px-2">
-                              <span className={SMALL_META_TEXT_CLASS}>SET {idx + 1}</span>
+                              <span className={SMALL_META_TEXT_CLASS}>
+                                {t('set')} {idx + 1}
+                              </span>
                               <div className="text-center">
                                 <span className="text-base font-bold tabular-nums text-white">
                                   {s.w}
                                 </span>
-                                <span className={`ml-1 ${SMALL_META_TEXT_CLASS}`}>kg</span>
+                                <span className={`ml-1 ${SMALL_META_TEXT_CLASS}`}>{t('kgUnit')}</span>
                               </div>
                               <div className="text-right">
                                 <span className="text-base font-bold tabular-nums text-white">
@@ -468,13 +483,24 @@ export default function ReviewScreen({
         </section>
       </div>
       <footer className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-[390px] border-t border-[#2A2A2A] bg-[#141414] p-4">
-        <button
-          type="button"
-          onClick={onBack}
-          className="w-full rounded-2xl bg-white py-5 text-sm font-black uppercase tracking-widest text-black"
-        >
-          Archive Session
-        </button>
+        <div className="flex gap-3">
+          {sessionId && onEditWorkout ? (
+            <button
+              type="button"
+              onClick={onEditWorkout}
+              className="flex-1 rounded-2xl border border-[#2A2A2A] bg-transparent py-5 text-sm font-bold text-white"
+            >
+              {lang === 'ru' ? 'Редактировать' : 'Edit Session'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex-1 rounded-2xl bg-white py-5 text-sm font-bold text-black"
+          >
+            {t('save')}
+          </button>
+        </div>
       </footer>
     </div>
   );

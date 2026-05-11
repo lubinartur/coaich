@@ -3,14 +3,13 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, Check, Plus, Trash2 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
 import type { LoggerTemplateExercise } from '@/constants/workoutPrograms';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db, getProfile } from '@/services/db';
 import { buildPrRecordsForSession, isSetPersonalRecord } from '@/services/prDetection';
 import {
   canonicalExerciseId,
   formatTargetLineForExercise,
   getLastPerformedSummary,
-  getProgressionStatusInlineText,
-  getProgressionStatusPresentation,
   getRecLastLayout,
   isTimedHoldExercise,
   parseRecommendLine,
@@ -19,7 +18,6 @@ import {
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession, WorkoutType } from '@/types';
 import ExercisePicker, { type ExercisePickerFilter } from '@/screens/Logger/ExercisePicker';
-import { progressionStatusDisplayText } from '@/utils/progressionDisplayLabels';
 import { toDisplayName } from '@/utils/toDisplayName';
 
 type SetRow = {
@@ -342,6 +340,7 @@ export default function LoggerScreen({
   onFinish,
   onClose,
 }: LoggerScreenProps) {
+  const { t, lang } = useTranslation();
   const [startedAt] = useState(() => new Date().toISOString());
   const [seconds, setSeconds] = useState(0);
   /** Workout clock runs only after the user taps Start Session (not on mount). */
@@ -356,6 +355,39 @@ export default function LoggerScreen({
   const [restDurationSec, setRestDurationSec] = useState(90);
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
   const [restZeroFlash, setRestZeroFlash] = useState(false);
+  const addExerciseFooterLabel = lang === 'ru' ? 'Упражнение' : 'Exercise';
+  const startFooterLabel = lang === 'ru' ? 'Начать' : 'Start';
+  const finishFooterLabel = lang === 'ru' ? 'Завершить' : 'Finish';
+
+  const getBadgeLabel = (label: RecommendBadgeConfig['label']) => {
+    switch (label) {
+      case 'HOLD':
+        return t('statusHold');
+      case 'BASE':
+        return t('statusBase');
+      case 'DELOAD':
+        return t('statusDeload');
+      default:
+        return t('statusRec');
+    }
+  };
+
+  const localizedWorkoutName = (() => {
+    switch (workoutType) {
+      case 'push':
+        return t('pushWorkoutName');
+      case 'pull':
+        return t('pullWorkoutName');
+      case 'legs':
+        return t('legsWorkoutName');
+      case 'full_body':
+        return t('fullBodyWorkoutName');
+      case 'custom':
+        return workoutName === 'Custom Workout' ? t('customWorkoutName') : toDisplayName(workoutName);
+      default:
+        return toDisplayName(workoutName);
+    }
+  })();
 
   useEffect(() => {
     let cancelled = false;
@@ -424,7 +456,7 @@ export default function LoggerScreen({
   }, []);
 
   const tryClose = () => {
-    if (window.confirm('End workout?')) {
+    if (window.confirm(t('endWorkout'))) {
       onClose();
     }
   };
@@ -614,12 +646,12 @@ export default function LoggerScreen({
           <button
             type="button"
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            aria-label="Close"
+            aria-label={t('close')}
             onClick={() => setRemoveConfirm(null)}
           />
           <Card className="relative z-10 w-full max-w-sm border-[#2A2A2A] bg-[#1C1C1C] p-5 shadow-2xl">
             <p className="text-center text-sm font-medium leading-snug text-white">
-              Remove {removeConfirm.name}?
+              {t('remove')} {removeConfirm.name}?
             </p>
             <div className="mt-4 flex gap-2">
               <Button
@@ -630,7 +662,7 @@ export default function LoggerScreen({
                 className="flex-1"
                 onClick={() => setRemoveConfirm(null)}
               >
-                Cancel
+                {t('cancel')}
               </Button>
               <Button
                 type="button"
@@ -640,7 +672,7 @@ export default function LoggerScreen({
                 className="flex-1"
                 onClick={confirmRemoveExercise}
               >
-                Remove
+                {t('remove')}
               </Button>
             </div>
           </Card>
@@ -653,12 +685,12 @@ export default function LoggerScreen({
             type="button"
             onClick={tryClose}
             className="-ml-1 p-1 text-white transition-opacity hover:opacity-80"
-            aria-label="Close workout"
+            aria-label={t('closeWorkout')}
           >
             <ArrowLeft className="h-6 w-6" />
           </button>
           <div>
-            <h1 className="text-lg font-bold text-white">{toDisplayName(workoutName)}</h1>
+            <h1 className="text-lg font-bold text-white">{localizedWorkoutName}</h1>
             <p className="font-mono text-sm font-medium tabular-nums text-[#8B5CF6]">{formatElapsed(seconds)}</p>
           </div>
         </div>
@@ -667,7 +699,7 @@ export default function LoggerScreen({
       <div className="min-h-0 flex-1 space-y-10 overflow-y-auto px-4 py-8 pb-40 no-scrollbar">
         {exercises.length === 0 ? (
           <div className="rounded-2xl border border-[#2A2A2A] bg-[#141414] py-10 text-center">
-            <p className="text-sm text-[#6B7280]">No exercises yet. Tap Add Exercise to begin.</p>
+            <p className="text-sm text-[#6B7280]">{t('noExercisesYet')}</p>
           </div>
         ) : (
           exercises.map((ex, exIdx) => {
@@ -682,9 +714,6 @@ export default function LoggerScreen({
             );
             const isBw = ex.equipment === 'bodyweight';
             const isTimed = ex.timedHold;
-            const pres = getProgressionStatusPresentation(ex.progressionStatus);
-            const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
-            const statusDisplay = progressionStatusDisplayText(statusInline, pres?.text);
             const recommendValue = recLastLayout.kind === 'unified' ? recLastLayout.value : ex.recommend.trim();
             const recommendBadge = ex.recommend.trim()
               ? getRecommendBadgeConfig(recLastLayout.kind === 'unified' ? recLastLayout.label : 'REC')
@@ -694,28 +723,6 @@ export default function LoggerScreen({
                 <div className="flex items-end justify-between border-b border-[#222222] pb-4">
                   <div>
                     <h3 className="text-2xl font-bold tracking-tight text-white">{toDisplayName(ex.name)}</h3>
-                    <div className="mt-2 flex flex-wrap items-center gap-3">
-                      <div className="inline-flex items-center gap-1.5 rounded border border-[#333333] bg-[#222222] px-2 py-0.5">
-                        <div
-                          className={`h-1 w-1 rounded-full animate-pulse ${pres?.dotClass ?? 'bg-[#6B7280]'}`}
-                          aria-hidden
-                        />
-                        {pres == null && statusInline == null ? (
-                          <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                            START
-                          </span>
-                        ) : null}
-                      </div>
-                      {statusDisplay ? (
-                        <span
-                          className={`text-[11px] font-mono font-bold ${pres?.textClass ?? 'text-[#8B5CF6]'}`}
-                        >
-                          {statusDisplay}
-                        </span>
-                      ) : !pres ? (
-                        <span className="text-[11px] font-mono font-bold text-[#6B7280]">First session</span>
-                      ) : null}
-                    </div>
                     <div className="mt-3 space-y-1 text-[12px] font-bold tracking-wide text-[#6B7280]">
                       {recommendBadge && recommendValue ? (
                         <div className="flex items-center gap-2">
@@ -726,13 +733,15 @@ export default function LoggerScreen({
                               }`}
                               aria-hidden
                             />
-                            <span>{recommendBadge.label}</span>
+                            <span>{getBadgeLabel(recommendBadge.label)}</span>
                           </span>
                           <span className="text-sm font-medium text-[#8B5CF6]">{recommendValue}</span>
                         </div>
                       ) : null}
                       {recLastLayout.kind === 'dual' && hasLastData ? (
-                        <p className="font-mono">Last {ex.last}</p>
+                        <p className="font-mono">
+                          {t('last')} {ex.last}
+                        </p>
                       ) : null}
                     </div>
                   </div>
@@ -740,7 +749,7 @@ export default function LoggerScreen({
                     type="button"
                     onClick={() => setRemoveConfirm({ exIdx, name: ex.name })}
                     className="p-1 text-[#333333] transition-colors hover:text-red-400"
-                    aria-label={`Remove ${ex.name}`}
+                    aria-label={`${t('remove')} ${ex.name}`}
                   >
                     <Trash2 className="h-[18px] w-[18px]" aria-hidden />
                   </button>
@@ -757,15 +766,15 @@ export default function LoggerScreen({
                     <span aria-hidden className="block min-h-[1em]" />
                     {!isBw ? (
                       <>
-                        <span className="block text-center">Weight</span>
+                        <span className="block text-center">{t('weight')}</span>
                         <span className="flex justify-center" aria-hidden>
                           ×
                         </span>
-                        <span className="block text-center">Reps</span>
+                        <span className="block text-center">{t('reps')}</span>
                       </>
                     ) : (
                       <>
-                        <span className="block text-center">{isTimed ? 'Sec' : 'Reps'}</span>
+                        <span className="block text-center">{isTimed ? t('sec') : t('reps')}</span>
                         <span aria-hidden className="block min-h-[1em]" />
                       </>
                     )}
@@ -783,7 +792,7 @@ export default function LoggerScreen({
                         } ${set.completed ? 'border border-[#22C55E]/10 bg-[#22C55E]/5' : 'bg-transparent'}`}
                       >
                         <div className="text-center">
-                          <span className="block text-[10px] font-black text-[#6B7280]">SET</span>
+                          <span className="block text-[10px] font-black text-[#6B7280]">{t('set')}</span>
                           <span className="text-sm font-black tabular-nums text-white">{setIdx + 1}</span>
                         </div>
                         {!isBw ? (
@@ -809,7 +818,7 @@ export default function LoggerScreen({
                             inputMode="numeric"
                             autoComplete="off"
                             placeholder="0"
-                            aria-label={isTimed ? 'Seconds' : 'Reps'}
+                            aria-label={isTimed ? t('seconds') : t('reps')}
                             className={fieldInputClass}
                             value={set.reps}
                             onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
@@ -819,7 +828,7 @@ export default function LoggerScreen({
                         <div className="flex min-w-0 items-stretch justify-end">
                           <button
                             type="button"
-                            aria-label={set.completed ? 'Uncomplete set' : 'Complete set'}
+                            aria-label={set.completed ? t('uncompleteSet') : t('completeSet')}
                             className={`flex min-h-[64px] w-[52px] shrink-0 items-center justify-center rounded-xl border shadow-lg transition-all ${
                               set.completed
                                 ? 'border-[#22C55E] bg-[#22C55E] text-white shadow-[#22C55E]/20'
@@ -842,7 +851,7 @@ export default function LoggerScreen({
                     className={setActionsBtnClass}
                   >
                     <Plus className="h-4 w-4 shrink-0" aria-hidden />
-                    Add
+                  {t('add').replace(/^\+\s*/, '')}
                   </button>
                   <button
                     type="button"
@@ -850,7 +859,7 @@ export default function LoggerScreen({
                     onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
                   >
                     <ArrowLeftRight className="h-4 w-4 shrink-0" aria-hidden />
-                    Swap
+                  {t('swap')}
                   </button>
                 </div>
               </section>
@@ -869,7 +878,7 @@ export default function LoggerScreen({
             className="fixed bottom-[100px] left-1/2 z-40 -translate-x-1/2"
             role="status"
             aria-live="polite"
-            aria-label={`Rest timer ${formatRestMmSs(restRemaining)} remaining`}
+            aria-label={`${t('rest')} ${formatRestMmSs(restRemaining)} ${t('remaining')}`}
           >
             <div
               className={`flex items-center rounded-full border border-[#2A2A2A] bg-[#1C1C1C] px-6 py-3 shadow-2xl transition-all ${
@@ -879,7 +888,7 @@ export default function LoggerScreen({
               }`}
             >
               <span className="text-sm font-bold tabular-nums text-white">
-                Rest {formatRestMmSs(restRemaining)}
+                {t('rest')} {formatRestMmSs(restRemaining)}
               </span>
               <div className={`mx-4 h-4 w-px ${restZeroFlash ? 'bg-white/30' : 'bg-[#2A2A2A]'}`} aria-hidden />
               <button
@@ -887,7 +896,7 @@ export default function LoggerScreen({
                 onClick={dismissRestTimer}
                 className={`text-sm font-bold ${restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'}`}
               >
-                Skip
+                {t('skip')}
               </button>
             </div>
           </motion.div>
@@ -898,19 +907,19 @@ export default function LoggerScreen({
         <button
           type="button"
           onClick={openPickerForAdd}
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-4 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
+          className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-5 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
         >
           <Plus className="h-[18px] w-[18px]" aria-hidden />
-          Add Exercise
+          {addExerciseFooterLabel}
         </button>
         {!isStarted ? (
           <button
             type="button"
             disabled={exercises.length === 0}
             onClick={() => setIsStarted(true)}
-            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#22C55E] px-8 py-4 text-sm font-bold text-white shadow-lg shadow-[#22C55E]/25 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#22C55E] py-5 text-sm font-bold text-white shadow-lg shadow-[#22C55E]/25 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Start Session
+            {startFooterLabel}
             <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
           </button>
         ) : (
@@ -918,9 +927,9 @@ export default function LoggerScreen({
             type="button"
             disabled={exercises.length === 0}
             onClick={() => void handleFinish()}
-            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#8B5CF6] px-8 py-4 text-sm font-bold text-white shadow-lg shadow-[#8B5CF6]/20 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#8B5CF6] py-5 text-sm font-bold text-white shadow-lg shadow-[#8B5CF6]/20 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Finish
+            {finishFooterLabel}
             <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
           </button>
         )}

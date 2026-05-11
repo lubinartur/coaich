@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Frown, Loader2, Meh, Smile, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db, getProfile } from '@/services/db';
 import { generateWorkoutReview } from '@/services/aiService';
 import { canonicalExerciseId, previewExerciseTarget } from '@/services/progressionEngine';
 import type { ExerciseRating, NextTarget, WorkoutSession } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
+import type { TranslationKey } from '@/i18n/translations';
 
 export type RatingExerciseItem = {
   exerciseId: string;
@@ -26,7 +28,7 @@ export interface RatingScreenProps {
 const RATING_OPTIONS = [
   {
     rating: 'good' as const,
-    label: 'Good',
+    labelKey: 'good' as TranslationKey,
     color: 'text-[#22C55E]',
     bg: 'bg-[#22C55E]/10',
     border: 'border-[#22C55E]/20',
@@ -34,7 +36,7 @@ const RATING_OPTIONS = [
   },
   {
     rating: 'okay' as const,
-    label: 'Okay',
+    labelKey: 'okay' as TranslationKey,
     color: 'text-[#F59E0B]',
     bg: 'bg-[#F59E0B]/10',
     border: 'border-[#F59E0B]/20',
@@ -42,7 +44,7 @@ const RATING_OPTIONS = [
   },
   {
     rating: 'bad' as const,
-    label: 'Bad',
+    labelKey: 'bad' as TranslationKey,
     color: 'text-[#EF4444]',
     bg: 'bg-[#EF4444]/10',
     border: 'border-[#EF4444]/20',
@@ -51,6 +53,7 @@ const RATING_OPTIONS = [
 ];
 
 export default function RatingScreen({ sessionId, onComplete, onBack }: RatingScreenProps) {
+  const { t } = useTranslation();
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [ratings, setRatings] = useState<Record<string, RowState>>({});
@@ -167,7 +170,7 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
   if (loading) {
     return (
       <div className="flex min-h-screen w-full flex-col bg-[#0A0A0A] px-6 pb-8 pt-12">
-        <p className="text-sm text-[#6B7280]">Loading…</p>
+        <p className="text-sm text-[#6B7280]">{t('loading')}</p>
       </div>
     );
   }
@@ -175,9 +178,9 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
   if (!session || exercises.length === 0) {
     return (
       <div className="flex min-h-screen w-full flex-col bg-[#0A0A0A] px-6 pb-8 pt-12">
-        <p className="text-sm text-[#6B7280]">Workout not found.</p>
+        <p className="text-sm text-[#6B7280]">{t('workoutNotFound')}</p>
         <Button type="button" variant="secondary" className="mt-6" onClick={onBack}>
-          Back
+          {t('back')}
         </Button>
       </div>
     );
@@ -191,13 +194,13 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
             type="button"
             onClick={onBack}
             className="-ml-1 p-1 text-white transition-opacity hover:opacity-80"
-            aria-label="Back"
+            aria-label={t('back')}
           >
             <ArrowLeft className="h-6 w-6" />
           </button>
         </div>
-        <h1 className="text-3xl font-bold text-white">How did it go?</h1>
-        <p className="mt-2 text-sm text-[#6B7280]">Rate each exercise before your AI review</p>
+        <h1 className="text-3xl font-bold text-white">{t('howDidItGo')}</h1>
+        <p className="mt-2 text-sm text-[#6B7280]">{t('rateBeforeReview')}</p>
       </header>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-6 pb-40 no-scrollbar">
@@ -226,13 +229,13 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
                       }`}
                     >
                       <Icon className="h-5 w-5" strokeWidth={2} />
-                      <span className="text-[10px] font-bold tracking-wider">{r.label}</span>
+                      <span className="text-[10px] font-bold tracking-wider">{t(r.labelKey)}</span>
                     </button>
                   );
                 })}
               </div>
               <textarea
-                placeholder="Add a note (e.g. felt light, shoulder tweak)"
+                placeholder={t('addNote')}
                 className="h-20 w-full resize-none rounded-xl border border-[#2A2A2A] bg-[#141414] p-3 text-sm text-white outline-none placeholder:text-[#6B7280] focus:border-[#8B5CF6]"
                 value={row?.note ?? ''}
                 onChange={(e) => setNote(ex.exerciseId, e.target.value)}
@@ -252,12 +255,12 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
           {generating ? (
             <span className="inline-flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
-              Generating Report…
+              {t('generating')}
             </span>
           ) : (
             <>
               <Sparkles className="h-5 w-5 shrink-0 fill-current" aria-hidden />
-              Get AI Review
+              {t('getAiReview')}
             </>
           )}
         </button>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Calendar, ChevronRight } from 'lucide-react';
 import { Card } from '@/components/ui';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
 import type { WorkoutSession } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
@@ -17,34 +18,34 @@ export interface HistoryScreenProps {
   refreshKey?: number;
 }
 
-function formatKg(n: number): string {
-  return n.toLocaleString('en-GB');
+function formatKg(n: number, locale: string): string {
+  return n.toLocaleString(locale);
 }
 
-function formatDurationMinutes(totalMinutes: number): string {
+function formatDurationMinutes(totalMinutes: number, hourShort: string, minuteShort: string): string {
   const m = Math.max(0, Math.round(totalMinutes));
   const h = Math.floor(m / 60);
   const min = m % 60;
-  if (h > 0) return `${h}h ${min.toString().padStart(2, '0')}m`;
-  return `${min}m`;
+  if (h > 0) return `${h}${hourShort} ${min.toString().padStart(2, '0')}${minuteShort}`;
+  return `${min}${minuteShort}`;
 }
 
-function formatWorkoutDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
+function formatWorkoutDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
   });
 }
 
-function sessionToRow(s: WorkoutSession) {
+function sessionToRow(s: WorkoutSession, locale: string, hourShort: string, minuteShort: string) {
   const sets = s.exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
   const muscles = [...new Set(s.exercises.map((e) => e.muscleGroup.toUpperCase()))];
   return {
     id: s.id,
     workoutName: s.name,
-    workoutDate: formatWorkoutDate(s.finishedAt),
-    duration: formatDurationMinutes(s.durationMinutes),
+    workoutDate: formatWorkoutDate(s.finishedAt, locale),
+    duration: formatDurationMinutes(s.durationMinutes, hourShort, minuteShort),
     volumeKg: s.totalVolume,
     sets,
     muscles,
@@ -52,6 +53,7 @@ function sessionToRow(s: WorkoutSession) {
 }
 
 export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: HistoryScreenProps) {
+  const { t, locale } = useTranslation();
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -74,9 +76,9 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
     return (
       <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">History</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-text-primary">{t('history')}</h1>
         </header>
-        <p className="text-sm text-text-secondary">Loading…</p>
+        <p className="text-sm text-text-secondary">{t('loading')}</p>
       </div>
     );
   }
@@ -85,10 +87,10 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
     return (
       <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">History</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-text-primary">{t('history')}</h1>
         </header>
         <Card className="border-border py-10 text-center">
-          <p className="text-sm text-text-secondary">No workouts yet. Start your first workout!</p>
+          <p className="text-sm text-text-secondary">{t('noWorkoutsYet')}</p>
         </Card>
       </div>
     );
@@ -97,12 +99,12 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
   return (
     <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">History</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-text-primary">{t('history')}</h1>
       </header>
 
       <div className="flex flex-col gap-3">
         {sessions.map((s) => {
-          const w = sessionToRow(s);
+          const w = sessionToRow(s, locale, t('hourShort'), t('minuteShort'));
           return (
             <div
               key={w.id}
@@ -139,9 +141,9 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
                   <p className="mt-2 text-sm text-[#6B7280]">
                     {w.duration}
                     <span className="mx-1.5">•</span>
-                    {formatKg(w.volumeKg)} kg
+                    {formatKg(w.volumeKg, locale)} {t('kgUnit')}
                     <span className="mx-1.5">•</span>
-                    {w.sets} sets
+                    {w.sets} {t('setsUnit')}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {w.muscles.map((m) => (
