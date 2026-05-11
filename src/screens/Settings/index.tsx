@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronRight, Download, Globe, Shield, Sliders, User, X } from 'lucide-react';
+import { ChevronRight, Download, Globe, LoaderCircle, Shield, Sliders, Upload, User, X } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { db } from '@/services/db';
+import { exportAllData, importAllData } from '@/services/dataExport';
 import type { Profile } from '@/types';
 
 const INJURY_LABEL: Record<string, string> = {
@@ -122,6 +123,9 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [sheet, setSheet] = useState<SheetId>(null);
+  const [advancedFeedback, setAdvancedFeedback] = useState<string | null>(null);
+  const [importingData, setImportingData] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   /** Draft state for sheets */
   const [pharmaMode, setPharmaMode] = useState<Profile['pharmacology']>('natural');
@@ -157,6 +161,12 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     if (sheet === 'weight') setTextDraft(String(profile.weight));
     if (sheet === 'height') setTextDraft(String(profile.height));
   }, [sheet, profile]);
+
+  useEffect(() => {
+    if (!advancedFeedback) return undefined;
+    const timeout = window.setTimeout(() => setAdvancedFeedback(null), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [advancedFeedback]);
 
   const closeSheet = () => setSheet(null);
 
@@ -240,6 +250,39 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     else await db.profile.update(1, { height: value });
     await reloadProfile();
     closeSheet();
+  };
+
+  const handleExportData = async () => {
+    try {
+      await exportAllData();
+      setAdvancedFeedback('Exported!');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Export failed.';
+      setAdvancedFeedback(message);
+    }
+  };
+
+  const handleImportClick = () => {
+    if (importingData) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImportingData(true);
+    setAdvancedFeedback(null);
+    try {
+      await importAllData(file);
+      setAdvancedFeedback('Imported!');
+      window.setTimeout(() => window.location.reload(), 600);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Import failed.';
+      setAdvancedFeedback(message);
+    } finally {
+      setImportingData(false);
+    }
   };
 
   if (loading) {
@@ -629,7 +672,7 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
           <button
             type="button"
             onClick={() => onOpenImport?.()}
-            className="group flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-white/[0.02]"
+            className="group flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
           >
             <div className="flex items-center gap-3">
               <Download className="h-4 w-4 text-[#6B7280]" aria-hidden />
@@ -640,7 +683,43 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
               aria-hidden
             />
           </button>
+          <button
+            type="button"
+            onClick={() => void handleExportData()}
+            className="group flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3">
+              <Download className="h-4 w-4 text-[#6B7280]" aria-hidden />
+              <span className="text-sm text-white">Export Data</span>
+            </div>
+            <span className="text-sm font-bold text-[#8B5CF6]">{advancedFeedback === 'Exported!' ? 'Exported!' : ''}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleImportClick}
+            disabled={importingData}
+            className="group flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-white/[0.02] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <div className="flex items-center gap-3">
+              {importingData ? (
+                <LoaderCircle className="h-4 w-4 animate-spin text-[#8B5CF6]" aria-hidden />
+              ) : (
+                <Upload className="h-4 w-4 text-[#6B7280]" aria-hidden />
+              )}
+              <span className="text-sm text-white">Import Data</span>
+            </div>
+            <span className={`text-sm font-bold ${advancedFeedback && advancedFeedback !== 'Exported!' ? 'text-[#8B5CF6]' : 'text-[#6B7280]'}`}>
+              {importingData ? 'Importing…' : advancedFeedback && advancedFeedback !== 'Exported!' ? advancedFeedback : ''}
+            </span>
+          </button>
         </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(e) => void handleImportFile(e)}
+        />
       </section>
     </div>
   );

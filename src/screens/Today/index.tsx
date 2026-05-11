@@ -13,18 +13,16 @@ import {
   type RecommendedWorkoutType,
   type WorkoutRecommendation,
 } from '@/services/coachService';
-import { getProfile } from '@/services/db';
+import { db, getProfile } from '@/services/db';
 import {
+  canonicalExerciseId,
   formatTargetLineForExercise,
-  getExerciseTarget,
   getLastPerformedSummary,
-  getProgressionStatusInlineText,
-  getProgressionStatusPresentation,
-  getRecLastLayout,
+  parseRecommendLine,
+  previewExerciseTarget,
   type ProgressionStatus,
 } from '@/services/progressionEngine';
 import type { Exercise, Profile } from '@/types';
-import { progressionStatusDisplayText } from '@/utils/progressionDisplayLabels';
 import { toDisplayName } from '@/utils/toDisplayName';
 
 const QUICK_PROGRAMS = [
@@ -43,6 +41,51 @@ type TodayExerciseRow = {
   last: string;
   progressionStatus: ProgressionStatus;
 };
+
+type TodayStatusBadge = {
+  label: 'REC' | 'HOLD' | 'BASE' | 'DELOAD';
+  badgeClass: string;
+  dotClass: string;
+  pulse: boolean;
+};
+
+function getTodayStatusBadge(status: ProgressionStatus): TodayStatusBadge {
+  switch (status) {
+    case 'maintaining':
+      return {
+        label: 'HOLD',
+        badgeClass:
+          'inline-flex items-center gap-1.5 rounded-full border border-[#F59E0B]/40 bg-[#F59E0B]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#F59E0B]',
+        dotClass: 'bg-[#F59E0B]',
+        pulse: false,
+      };
+    case 'baseline':
+    case 'first_session':
+      return {
+        label: 'BASE',
+        badgeClass:
+          'inline-flex items-center gap-1.5 rounded-full border border-[#6B7280]/40 bg-[#6B7280]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#6B7280]',
+        dotClass: 'bg-[#6B7280]',
+        pulse: false,
+      };
+    case 'deload':
+      return {
+        label: 'DELOAD',
+        badgeClass:
+          'inline-flex items-center gap-1.5 rounded-full border border-[#60A5FA]/40 bg-[#60A5FA]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#60A5FA]',
+        dotClass: 'bg-[#60A5FA]',
+        pulse: false,
+      };
+    default:
+      return {
+        label: 'REC',
+        badgeClass:
+          'inline-flex items-center gap-1.5 rounded-full border border-[#8B5CF6]/40 bg-[#8B5CF6]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#8B5CF6]',
+        dotClass: 'bg-[#8B5CF6]',
+        pulse: true,
+      };
+  }
+}
 
 const FOCUS_SUBTITLE: Record<RecommendedWorkoutType, string> = {
   push: 'Chest, shoulders & triceps',
@@ -91,10 +134,15 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   const [coachAiMessage, setCoachAiMessage] = useState<string | null>(null);
   const [coachAiLoading, setCoachAiLoading] = useState(false);
   const [coachMessageExpanded, setCoachMessageExpanded] = useState(false);
+  const [expandedExerciseIds, setExpandedExerciseIds] = useState<string[]>([]);
 
   useEffect(() => {
     setCoachMessageExpanded(false);
   }, [coachAiMessage]);
+
+  useEffect(() => {
+    setExpandedExerciseIds([]);
+  }, [rows]);
 
   const startQuickProgram = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
     if (program === 'custom') {
@@ -156,13 +204,20 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           return Promise.all(
             exercises.map(async (ex) => {
               try {
-                const target = await getExerciseTarget(
-                  ex.exerciseId,
-                  ex.name,
-                  p.goal,
-                  p.pharmacology,
-                  { deloadWeek, persist: false },
-                );
+                const cid = canonicalExerciseId(ex.exerciseId);
+                let storedTarget = await db.exerciseTargets.get(cid);
+                if (!storedTarget && ex.exerciseId !== cid) {
+                  storedTarget = await db.exerciseTargets.get(ex.exerciseId);
+                }
+                const preview = await previewExerciseTarget(ex.exerciseId, ex.name, p.goal, p.pharmacology, {
+                  deloadWeek,
+                });
+                const target =
+                  storedTarget != null
+                    ? { weight: storedTarget.weight, reps: storedTarget.reps, sets: storedTarget.sets }
+                    : preview != null
+                      ? { weight: preview.weight, reps: preview.reps, sets: preview.sets }
+                      : null;
                 const last = await getLastPerformedSummary(ex.exerciseId);
                 return {
                   exerciseId: ex.exerciseId,
@@ -179,7 +234,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                       )
                     : 'First session',
                   last: last ?? '—',
-                  progressionStatus: target?.progressionStatus ?? 'first_session',
+                  progressionStatus: preview?.progressionStatus ?? 'first_session',
                 };
               } catch (err) {
                 console.error('[Today] exercise row load error', ex.exerciseId, err);
@@ -294,6 +349,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   }
 
   const displayRows = rows;
+  const toggleExerciseExpanded = (exerciseId: string) => {
+    setExpandedExerciseIds((prev) =>
+      prev.includes(exerciseId) ? prev.filter((id) => id !== exerciseId) : [...prev, exerciseId],
+    );
+  };
 
   const isRestRecommended = reco !== null && reco.workoutType === null;
 
@@ -310,9 +370,6 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           ? 'Full body'
           : toDisplayName(displayWorkoutType)
         : '';
-
-  const recHoldPillClass =
-    'text-[10px] font-black px-1.5 py-0.5 rounded-sm uppercase tracking-wide bg-[#8B5CF6]/25 text-[#8B5CF6] border border-[#8B5CF6]/35';
 
   return (
     <motion.div
@@ -441,31 +498,69 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
               <p className="py-3 text-sm text-[#6B7280]">Loading targets…</p>
             ) : displayRows.length > 0 ? (
               <>
-                <div className="divide-y divide-[#2A2A2A]">
+                <div className="space-y-2">
                   {displayRows.map((ex) => {
-                    const layout = getRecLastLayout(ex.rec, ex.last, ex.progressionStatus);
-                    const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
-                    const statusPres = getProgressionStatusPresentation(ex.progressionStatus);
-                    const statusDisplay = progressionStatusDisplayText(statusInline, statusPres?.text);
-                    const statusClass = statusPres?.textClass ?? 'text-[#8B5CF6]';
+                    const badge = getTodayStatusBadge(ex.progressionStatus);
+                    const isExpanded = expandedExerciseIds.includes(ex.exerciseId);
+                    const parsedTarget = parseRecommendLine(ex.rec.trim());
+                    const isTimedTarget = /\d+s\s*×/i.test(ex.rec);
                     return (
                       <div
                         key={ex.exerciseId}
-                        className="group flex cursor-default items-center justify-between gap-3 py-3"
+                        className="overflow-hidden rounded-2xl border border-[#222222] bg-[#111111]"
                       >
-                        <span className="min-w-0 flex-1 truncate text-base font-bold tracking-tight text-white transition-colors group-hover:text-[#8B5CF6]">
-                          {toDisplayName(ex.name)}
-                        </span>
-                        <div className="flex min-w-0 shrink-0 items-center gap-2">
-                          <span className={recHoldPillClass}>
-                            {layout.kind === 'unified' ? layout.label.replace(':', '').trim() : 'REC'}
+                        <button
+                          type="button"
+                          onClick={() => toggleExerciseExpanded(ex.exerciseId)}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]"
+                          aria-expanded={isExpanded}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-base font-bold text-white">
+                            {toDisplayName(ex.name)}
                           </span>
-                          {statusDisplay ? (
-                            <span className={`whitespace-nowrap text-[11px] font-mono font-bold ${statusClass}`}>
-                              {statusDisplay}
+                          <div className="shrink-0">
+                            <span className={badge.badgeClass}>
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${badge.dotClass} ${
+                                  badge.pulse ? 'animate-pulse' : ''
+                                }`}
+                                aria-hidden
+                              />
+                              {badge.label}
                             </span>
-                          ) : null}
-                        </div>
+                          </div>
+                        </button>
+                        {isExpanded ? (
+                          <div className="border-t border-white/5 px-4 pb-3 pt-3">
+                            {parsedTarget ? (
+                              <>
+                                <div className="mb-2 grid grid-cols-[42px_minmax(0,1fr)_64px] gap-2 text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                                  <span>Set</span>
+                                  <span className="text-center">Weight</span>
+                                  <span className="text-right">{isTimedTarget ? 'Time' : 'Reps'}</span>
+                                </div>
+                                <div className="space-y-2">
+                                  {Array.from({ length: parsedTarget.sets }, (_, idx) => (
+                                    <div
+                                      key={`${ex.exerciseId}-target-${idx + 1}`}
+                                      className="grid grid-cols-[42px_minmax(0,1fr)_64px] items-center gap-2"
+                                    >
+                                      <span className="text-xs text-[#6B7280]">SET {idx + 1}</span>
+                                      <span className="text-center text-sm font-medium text-white">
+                                        {ex.equipment === 'bodyweight' ? 'Bodyweight' : `${parsedTarget.weight}kg`}
+                                      </span>
+                                      <span className="text-right text-sm font-medium text-[#8B5CF6]">
+                                        {isTimedTarget ? `${parsedTarget.reps}s` : parsedTarget.reps}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            ) : (
+                              <p className="text-sm text-[#6B7280]">Targets will appear after your first workout.</p>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}

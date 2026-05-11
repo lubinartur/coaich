@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
-  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -37,7 +36,7 @@ function formatDurationMinutes(totalMinutes: number): string {
 type StatTile = { label: string; value: string };
 
 const STATS_PLACEHOLDER: StatTile[] = [
-  { label: 'VOLUME', value: '420kg' },
+  { label: 'VOLUME (kg)', value: '420' },
   { label: 'SETS', value: '18' },
   { label: 'EXERCISES', value: '6' },
   { label: 'DURATION', value: '1h 05m' },
@@ -46,8 +45,7 @@ const STATS_PLACEHOLDER: StatTile[] = [
 /** Stats grid only: always kg, comma thousands when ≥ 1000. */
 function formatStatVolumeKg(volKg: number): string {
   const rounded = Math.round(volKg);
-  const num = rounded >= 1000 ? rounded.toLocaleString('en-US') : String(rounded);
-  return `${num}kg`;
+  return rounded >= 1000 ? rounded.toLocaleString('en-US') : String(rounded);
 }
 
 const LOG_EXERCISES = [
@@ -81,12 +79,19 @@ function exerciseVolumeKg(sets: { w: number; r: number; completed: boolean }[]):
   return sets.filter((s) => s.completed).reduce((a, s) => a + s.w * s.r, 0);
 }
 
-function formatVolumeDisplay(volKg: number): { value: string; unit: string } {
-  if (volKg < 1000) {
-    return { value: String(Math.round(volKg)), unit: 'kg' };
-  }
-  return { value: (volKg / 1000).toFixed(1), unit: 't' };
+function formatVolumeDisplay(volKg: number): string {
+  return `${Math.round(volKg).toLocaleString('en-US')}kg`;
 }
+
+const SECTION_HEADER_CLASS = 'text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]';
+const WORKOUT_TITLE_CLASS = 'text-4xl font-black tracking-tight text-white';
+const BODY_TEXT_CLASS = 'text-base font-normal leading-relaxed text-[#AAAAAA]';
+const EXERCISE_NAME_CLASS = 'text-base font-bold text-white';
+const STAT_NUMBER_CLASS = 'text-3xl font-black tracking-tight text-white';
+const SMALL_META_TEXT_CLASS = 'text-xs text-[#6B7280]';
+const STAT_CARD_LABEL_CLASS = 'text-[9px] font-black uppercase tracking-widest text-[#6B7280]';
+const PR_VALUE_CLASS = 'text-sm text-[#F59E0B]';
+const NOTE_INDEX_CLASS = 'text-sm font-black text-[#8B5CF6]';
 
 /** PR row title — same display name rules as session rows. */
 function prDisplayName(r: PrRecord): string {
@@ -199,7 +204,7 @@ export default function ReviewScreen({
     const volKg = session.totalVolume;
     const durMin = Math.max(0, Math.round(session.durationMinutes));
     return [
-      { label: 'VOLUME', value: formatStatVolumeKg(volKg) },
+      { label: 'VOLUME (kg)', value: formatStatVolumeKg(volKg) },
       { label: 'SETS', value: String(setCount) },
       { label: 'EXERCISES', value: String(session.exercises.length) },
       { label: 'DURATION', value: formatDurationMinutes(durMin) },
@@ -233,15 +238,7 @@ export default function ReviewScreen({
   return (
     <div className="min-h-screen w-full animate-in fade-in slide-in-from-bottom-8 bg-[#0A0A0A] pb-24 duration-700">
       <header className="sticky top-0 z-10 border-b border-[#2A2A2A] bg-[#0A0A0A]/80 px-6 pb-6 pt-6 backdrop-blur-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-2xl bg-white/5 p-3 text-white transition-colors hover:bg-white/10"
-            aria-label="Back"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
+        <div className="mb-8 flex items-center justify-end">
           {sessionId && onEditWorkout ? (
             <button
               type="button"
@@ -250,18 +247,16 @@ export default function ReviewScreen({
             >
               Edit Session
             </button>
-          ) : (
-            <span className="w-10" aria-hidden />
-          )}
+          ) : null}
         </div>
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <div className="h-1.5 w-1.5 rounded-full bg-[#8B5CF6]" aria-hidden />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+            <span className={SMALL_META_TEXT_CLASS}>
               {workoutDate}
             </span>
           </div>
-          <h1 className="text-4xl font-black tracking-tighter text-white">{toDisplayName(workoutName)}</h1>
+          <h1 className={WORKOUT_TITLE_CLASS}>{toDisplayName(workoutName)}</h1>
         </div>
       </header>
 
@@ -272,11 +267,11 @@ export default function ReviewScreen({
               key={stat.label}
               className="group relative overflow-hidden rounded-[24px] border border-[#222222] bg-[#111111] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#333333]"
             >
-              <span className="relative z-10 text-[9px] font-black tracking-[0.15em] text-[#6B7280]">
+              <span className={`relative z-10 ${STAT_CARD_LABEL_CLASS}`}>
                 {stat.label}
               </span>
               <div className="relative z-10 mt-2">
-                <div className="text-3xl font-black tracking-tighter transition-colors group-hover:text-[#8B5CF6]">
+                <div className={`${STAT_NUMBER_CLASS} transition-colors group-hover:text-[#8B5CF6]`}>
                   {stat.value}
                 </div>
               </div>
@@ -294,7 +289,7 @@ export default function ReviewScreen({
               <div className="rounded-lg bg-[#F59E0B] p-1.5 shadow-lg shadow-[#F59E0B]/20">
                 <Trophy className="h-4 w-4 fill-black text-black" aria-hidden />
               </div>
-              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Personal Records</h3>
+              <h3 className={SECTION_HEADER_CLASS}>Personal Records</h3>
             </div>
             <div className="divide-y divide-[#F59E0B]/15">
               {prRecordsForDisplay.map((r) => (
@@ -302,8 +297,8 @@ export default function ReviewScreen({
                   key={r.id ?? `${r.exerciseId}-${r.achievedAt}`}
                   className="py-3 first:pt-0 last:pb-0"
                 >
-                  <p className="text-base font-bold text-white">{prDisplayName(r)}</p>
-                  <p className="mt-1 text-sm text-[#F59E0B]">{prWeightSubtitle(r)}</p>
+                  <p className={EXERCISE_NAME_CLASS}>{prDisplayName(r)}</p>
+                  <p className={`mt-1 ${PR_VALUE_CLASS}`}>{prWeightSubtitle(r)}</p>
                 </div>
               ))}
             </div>
@@ -319,8 +314,8 @@ export default function ReviewScreen({
               AI
             </div>
             <div>
-              <h3 className="text-2xl font-black uppercase tracking-tighter text-white">Coach Analysis</h3>
-              <p className="text-[10px] font-black uppercase tracking-widest text-[#6B7280]">
+              <h3 className="text-2xl font-black uppercase tracking-tight text-white">Coach Analysis</h3>
+              <p className="text-[10px] uppercase tracking-widest text-[#6B7280]">
                 Post-Session Intelligence
               </p>
             </div>
@@ -333,43 +328,43 @@ export default function ReviewScreen({
               <div className="h-2 w-[80%] animate-pulse rounded-full bg-[#111111]" />
             </div>
           ) : sessionId && !coachReview ? (
-            <p className="px-2 text-sm text-[#6B7280]">No AI review for this workout.</p>
+            <p className={`px-2 ${BODY_TEXT_CLASS}`}>No AI review for this workout.</p>
           ) : coachReview ? (
             <div className="space-y-10 px-2">
-              <p className="text-xl font-medium italic leading-tight tracking-tight text-white/90">
+              <p className={BODY_TEXT_CLASS}>
                 {coachReview.intro}
               </p>
 
               <div className="grid grid-cols-1 gap-12">
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#22C55E]">
-                    <CheckCircle2 className="h-3 w-3" strokeWidth={3} aria-hidden />
+                  <div className={`flex items-center gap-2 ${SECTION_HEADER_CLASS}`}>
+                    <CheckCircle2 className="h-3 w-3 text-[#22C55E]" strokeWidth={3} aria-hidden />
                     What went well
                   </div>
                   <div className="space-y-3">
                     {coachReview.wentWell.map((p, i) => (
                       <div key={`${p}-${i}`} className="group flex gap-4">
-                        <span className="mt-1 font-mono font-black text-[#22C55E] opacity-40 transition-opacity group-hover:opacity-100">
+                        <span className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
                           {String(i + 1).padStart(2, '0')}
                         </span>
-                        <p className="text-base leading-snug text-[#AAAAAA]">{p}</p>
+                        <p className={BODY_TEXT_CLASS}>{p}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#F59E0B]">
-                    <AlertCircle className="h-3 w-3" strokeWidth={3} aria-hidden />
+                  <div className={`flex items-center gap-2 ${SECTION_HEADER_CLASS}`}>
+                    <AlertCircle className="h-3 w-3 text-[#F59E0B]" strokeWidth={3} aria-hidden />
                     To improve
                   </div>
                   <div className="space-y-3">
                     {coachReview.toImprove.map((p, i) => (
                       <div key={`${p}-${i}`} className="group flex gap-4">
-                        <span className="mt-1 font-mono font-black text-[#F59E0B] opacity-40 transition-opacity group-hover:opacity-100">
+                        <span className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
                           {String(i + 1).padStart(2, '0')}
                         </span>
-                        <p className="text-base leading-snug text-[#AAAAAA]">{p}</p>
+                        <p className={BODY_TEXT_CLASS}>{p}</p>
                       </div>
                     ))}
                   </div>
@@ -378,19 +373,19 @@ export default function ReviewScreen({
 
               {coachReview.exerciseNotes.length > 0 ? (
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#8B5CF6]">
-                    <MessageSquare className="h-3 w-3" strokeWidth={3} aria-hidden />
+                  <div className={`flex items-center gap-2 ${SECTION_HEADER_CLASS}`}>
+                    <MessageSquare className="h-3 w-3 text-[#8B5CF6]" strokeWidth={3} aria-hidden />
                     Exercise notes
                   </div>
                   <div className="space-y-3">
                     {coachReview.exerciseNotes.map((block, i) => (
                       <div key={`${block.exerciseId}-${block.exerciseName}-${i}`} className="group flex gap-4">
-                        <span className="mt-1 font-mono font-black text-[#8B5CF6] opacity-40 transition-opacity group-hover:opacity-100">
+                        <span className={`mt-1 ${NOTE_INDEX_CLASS}`}>
                           {String(i + 1).padStart(2, '0')}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="font-bold text-white">{toDisplayName(block.exerciseName || 'Exercise')}</p>
-                          <p className="mt-1 text-base leading-snug text-[#AAAAAA]">{block.note}</p>
+                          <p className={EXERCISE_NAME_CLASS}>{toDisplayName(block.exerciseName || 'Exercise')}</p>
+                          <p className={`mt-1 ${BODY_TEXT_CLASS}`}>{block.note}</p>
                         </div>
                       </div>
                     ))}
@@ -399,12 +394,12 @@ export default function ReviewScreen({
               ) : null}
             </div>
           ) : (
-            <p className="px-2 text-sm text-[#6B7280]">No AI review for this workout.</p>
+            <p className={`px-2 ${BODY_TEXT_CLASS}`}>No AI review for this workout.</p>
           )}
         </section>
 
         <section className="space-y-6">
-          <h3 className="px-2 text-center text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+          <h3 className={`px-2 text-center ${SECTION_HEADER_CLASS}`}>
             Exercise log
           </h3>
           <div className="space-y-4">
@@ -420,12 +415,11 @@ export default function ReviewScreen({
                     className="group flex w-full items-center justify-between p-6 text-left transition-colors hover:bg-[#181818]"
                   >
                     <div>
-                      <div className="text-xl font-bold tracking-tight text-white transition-colors group-hover:text-[#8B5CF6]">
+                      <div className={`${EXERCISE_NAME_CLASS} transition-colors group-hover:text-[#8B5CF6]`}>
                         {toDisplayName(ex.name)}
                       </div>
-                      <div className="mt-1 text-[9px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
-                        {completed.length} sets • {volDisp.value}
-                        {volDisp.unit ? ` ${volDisp.unit}` : ''}
+                      <div className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
+                        {completed.length} sets • {volDisp}
                       </div>
                     </div>
                     <div className="rounded-full bg-[#222222] p-2 transition-all group-hover:bg-[#8B5CF6]/20 group-hover:text-[#8B5CF6]">
@@ -442,22 +436,22 @@ export default function ReviewScreen({
                         className="overflow-hidden"
                       >
                         <div className="space-y-4 border-t border-white/5 px-6 pb-6 pt-4">
-                          <div className="mb-2 grid grid-cols-3 gap-2 px-2 text-[8px] font-black uppercase tracking-[0.3em] text-[#6B7280]/50">
+                          <div className={`mb-2 grid grid-cols-3 gap-2 px-2 ${STAT_CARD_LABEL_CLASS}`}>
                             <span>Set</span>
                             <span className="text-center">Weight</span>
                             <span className="text-right">Reps</span>
                           </div>
                           {completed.map((s, idx) => (
                             <div key={s.n} className="grid grid-cols-3 items-center gap-2 px-2">
-                              <span className="text-[10px] font-black text-[#6B7280]">SET {idx + 1}</span>
+                              <span className={SMALL_META_TEXT_CLASS}>SET {idx + 1}</span>
                               <div className="text-center">
-                                <span className="text-xl font-black tabular-nums tracking-tighter text-white">
+                                <span className="text-base font-bold tabular-nums text-white">
                                   {s.w}
                                 </span>
-                                <span className="ml-1 text-[9px] uppercase text-[#333333]">kg</span>
+                                <span className={`ml-1 ${SMALL_META_TEXT_CLASS}`}>kg</span>
                               </div>
                               <div className="text-right">
-                                <span className="text-xl font-black tabular-nums tracking-tighter text-[#8B5CF6]">
+                                <span className="text-base font-bold tabular-nums text-white">
                                   {s.r}
                                 </span>
                               </div>
@@ -473,6 +467,15 @@ export default function ReviewScreen({
           </div>
         </section>
       </div>
+      <footer className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-[390px] border-t border-[#2A2A2A] bg-[#141414] p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="w-full rounded-2xl bg-white py-5 text-sm font-black uppercase tracking-widest text-black"
+        >
+          Archive Session
+        </button>
+      </footer>
     </div>
   );
 }

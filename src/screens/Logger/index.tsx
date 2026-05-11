@@ -44,6 +44,51 @@ type LoggerExercise = {
   sets: SetRow[];
 };
 
+type RecommendBadgeConfig = {
+  label: 'REC' | 'HOLD' | 'BASE' | 'DELOAD';
+  badgeClass: string;
+  dotClass: string;
+  pulse: boolean;
+};
+
+function getRecommendBadgeConfig(rawLabel: string): RecommendBadgeConfig {
+  const normalized = rawLabel.replace(':', '').trim().toUpperCase();
+  switch (normalized) {
+    case 'HOLD':
+      return {
+        label: 'HOLD',
+        badgeClass:
+          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#F59E0B]/40 bg-[#F59E0B]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#F59E0B]',
+        dotClass: 'bg-[#F59E0B]',
+        pulse: false,
+      };
+    case 'BASE':
+      return {
+        label: 'BASE',
+        badgeClass:
+          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#6B7280]/40 bg-[#6B7280]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#6B7280]',
+        dotClass: 'bg-[#6B7280]',
+        pulse: false,
+      };
+    case 'DELOAD':
+      return {
+        label: 'DELOAD',
+        badgeClass:
+          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#60A5FA]/40 bg-[#60A5FA]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#60A5FA]',
+        dotClass: 'bg-[#60A5FA]',
+        pulse: false,
+      };
+    default:
+      return {
+        label: 'REC',
+        badgeClass:
+          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#8B5CF6]/40 bg-[#8B5CF6]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#8B5CF6]',
+        dotClass: 'bg-[#8B5CF6]',
+        pulse: true,
+      };
+  }
+}
+
 function makeId(): string {
   return Math.random().toString(36).slice(2, 11);
 }
@@ -626,6 +671,10 @@ export default function LoggerScreen({
           </div>
         ) : (
           exercises.map((ex, exIdx) => {
+            const hasLastData = (() => {
+              const last = ex.last.trim();
+              return last !== '' && last !== '—' && last !== '-' && last !== '–';
+            })();
             const recLastLayout = getRecLastLayout(
               ex.recommend.trim(),
               ex.last.trim(),
@@ -636,6 +685,10 @@ export default function LoggerScreen({
             const pres = getProgressionStatusPresentation(ex.progressionStatus);
             const statusInline = getProgressionStatusInlineText(ex.progressionStatus);
             const statusDisplay = progressionStatusDisplayText(statusInline, pres?.text);
+            const recommendValue = recLastLayout.kind === 'unified' ? recLastLayout.value : ex.recommend.trim();
+            const recommendBadge = ex.recommend.trim()
+              ? getRecommendBadgeConfig(recLastLayout.kind === 'unified' ? recLastLayout.label : 'REC')
+              : null;
             return (
               <section key={`${ex.exerciseId}-${exIdx}`} className="space-y-6">
                 <div className="flex items-end justify-between border-b border-[#222222] pb-4">
@@ -663,20 +716,24 @@ export default function LoggerScreen({
                         <span className="text-[11px] font-mono font-bold text-[#6B7280]">First session</span>
                       ) : null}
                     </div>
-                    <div className="mt-3 space-y-1 font-mono text-[12px] font-bold tracking-wide text-[#6B7280]">
-                      {recLastLayout.kind === 'unified' ? (
-                        <p>
-                          <span className="text-[#6B7280]">{recLastLayout.label} </span>
-                          <span className={recLastLayout.lineClass}>{recLastLayout.value}</span>
-                        </p>
-                      ) : (
-                        <>
-                          {ex.recommend.trim() ? (
-                            <p className="text-[#8B5CF6]">Recommend {ex.recommend}</p>
-                          ) : null}
-                          <p>Last {ex.last}</p>
-                        </>
-                      )}
+                    <div className="mt-3 space-y-1 text-[12px] font-bold tracking-wide text-[#6B7280]">
+                      {recommendBadge && recommendValue ? (
+                        <div className="flex items-center gap-2">
+                          <span className={recommendBadge.badgeClass}>
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${recommendBadge.dotClass} ${
+                                recommendBadge.pulse ? 'animate-pulse' : ''
+                              }`}
+                              aria-hidden
+                            />
+                            <span>{recommendBadge.label}</span>
+                          </span>
+                          <span className="text-sm font-medium text-[#8B5CF6]">{recommendValue}</span>
+                        </div>
+                      ) : null}
+                      {recLastLayout.kind === 'dual' && hasLastData ? (
+                        <p className="font-mono">Last {ex.last}</p>
+                      ) : null}
                     </div>
                   </div>
                   <button
@@ -785,7 +842,7 @@ export default function LoggerScreen({
                     className={setActionsBtnClass}
                   >
                     <Plus className="h-4 w-4 shrink-0" aria-hidden />
-                    ＋ Add
+                    Add
                   </button>
                   <button
                     type="button"
@@ -793,7 +850,7 @@ export default function LoggerScreen({
                     onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
                   >
                     <ArrowLeftRight className="h-4 w-4 shrink-0" aria-hidden />
-                    ⇄ Swap
+                    Swap
                   </button>
                 </div>
               </section>
@@ -806,29 +863,29 @@ export default function LoggerScreen({
         {restRemaining !== null ? (
           <motion.div
             key="rest-timer"
-            initial={{ y: 50, opacity: 0 }}
+            initial={{ y: 18, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 50, opacity: 0 }}
-            className="fixed bottom-24 left-1/2 z-40 w-[calc(100%-2.5rem)] max-w-[360px] -translate-x-1/2"
+            exit={{ y: 18, opacity: 0 }}
+            className="fixed bottom-[100px] left-1/2 z-40 -translate-x-1/2"
             role="status"
             aria-live="polite"
             aria-label={`Rest timer ${formatRestMmSs(restRemaining)} remaining`}
           >
             <div
-              className={`flex items-center gap-4 rounded-full border px-6 py-3 shadow-2xl transition-all ${
+              className={`flex items-center rounded-full border border-[#2A2A2A] bg-[#1C1C1C] px-6 py-3 shadow-2xl transition-all ${
                 restZeroFlash
                   ? 'animate-pulse border-[#8B5CF6] bg-[#8B5CF6] text-white'
-                  : 'border-[#2A2A2A] bg-[#1C1C1C]'
+                  : ''
               }`}
             >
-              <span className="w-20 text-sm font-bold tabular-nums text-white">
+              <span className="text-sm font-bold tabular-nums text-white">
                 Rest {formatRestMmSs(restRemaining)}
               </span>
-              <div className="h-4 w-px bg-[#2A2A2A]" aria-hidden />
+              <div className={`mx-4 h-4 w-px ${restZeroFlash ? 'bg-white/30' : 'bg-[#2A2A2A]'}`} aria-hidden />
               <button
                 type="button"
                 onClick={dismissRestTimer}
-                className="text-xs font-bold text-[#8B5CF6]"
+                className={`text-sm font-bold ${restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'}`}
               >
                 Skip
               </button>

@@ -131,21 +131,6 @@ export default function ProgressScreen() {
     };
   }, [sessions]);
 
-  useEffect(() => {
-    if (!metrics) return;
-    console.log('[Progress] rendered metrics (Dexie → progressMetrics)', {
-      strengthIndex: metrics.thisOverall,
-      benchmarks: metrics.benchmarks.map((b) => ({
-        label: b.label,
-        displayKg: b.displayKg,
-        exerciseId: b.exerciseId,
-      })),
-      weeklyVolumeByMuscle: metrics.volumeRows,
-      weeklyVolumeMaxSets: metrics.maxVol,
-      splits: metrics.splits,
-    });
-  }, [metrics]);
-
   if (loading) {
     return (
       <div className="flex flex-col gap-6 px-6 pb-32 pt-10">
@@ -199,45 +184,14 @@ export default function ProgressScreen() {
 
       <section className="relative overflow-hidden rounded-[32px] border border-white/5 bg-[#141414]/80 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.98]">
         <div className="relative z-10">
-          <div className="mb-2 flex items-start justify-between">
+          <div className="mb-2 text-center">
             <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
               Current Strength Index
             </h3>
-            {overallPct !== null && overallTrendUp ? (
-              <div className="rounded-md border border-[#22C55E]/20 bg-[#22C55E]/10 px-2 py-1">
-                <span className="text-[10px] font-black uppercase tracking-wider text-[#22C55E]">
-                  {formatPct(overallPct)}
-                </span>
-              </div>
-            ) : null}
           </div>
 
-          <div className="flex items-baseline gap-4">
+          <div className="text-center">
             <span className="text-7xl font-black tracking-tighter text-white">{thisOverall}</span>
-            <div className="flex flex-col">
-              <span
-                className={`flex items-center gap-1 font-mono text-xs font-black ${
-                  overallTrendUp
-                    ? 'text-[#22C55E]'
-                    : overallTrendDown
-                      ? 'text-[#EF4444]'
-                      : 'text-[#6B7280]'
-                }`}
-              >
-                {overallTrendUp ? <TrendingUp className="h-3.5 w-3.5" /> : null}
-                {overallTrendDown ? <TrendingDown className="h-3.5 w-3.5" /> : null}
-                {overallPct !== null && overallPct !== 0
-                  ? formatPct(overallPct)
-                  : overallTrendFlat
-                    ? formatPct(0)
-                    : overallPct === null && thisOverall > 0
-                      ? 'New'
-                      : '—'}
-              </span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                vs last week
-              </span>
-            </div>
           </div>
 
           <div className="mt-10 grid grid-cols-3 gap-3">
@@ -252,7 +206,7 @@ export default function ProgressScreen() {
               return (
                 <div
                   key={key}
-                  className="rounded-2xl border border-white/5 bg-[#050505]/40 p-4 backdrop-blur-md transition-all hover:bg-[#050505]/60"
+                  className="flex flex-col items-center rounded-2xl border border-white/5 bg-[#050505]/40 p-4 text-center backdrop-blur-md transition-all hover:bg-[#050505]/60"
                 >
                   <span className="mb-2 block text-[9px] font-black tracking-[0.2em] text-[#6B7280]">
                     {SPLIT_LABEL[key]}
@@ -262,7 +216,7 @@ export default function ProgressScreen() {
                   </span>
                   {showTrendRow ? (
                     <div
-                      className={`mt-2 flex items-center gap-1 text-[9px] font-black uppercase tracking-tight ${
+                      className={`mt-2 flex items-center justify-center gap-1 text-[9px] font-black uppercase tracking-tight ${
                         up ? 'text-[#22C55E]' : down ? 'text-[#EF4444]' : 'text-[#6B7280]'
                       }`}
                     >
@@ -284,8 +238,8 @@ export default function ProgressScreen() {
 
       {benchmarksWithData.length > 0 ? (
         <section className="space-y-6">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+          <div>
+            <h3 className="text-left text-sm font-black uppercase tracking-widest text-[#6B7280]">
               Benchmark Lifts
             </h3>
           </div>
@@ -302,7 +256,7 @@ export default function ProgressScreen() {
                   </span>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-baseline gap-1">
-                      <span className="text-4xl font-black tabular-nums tracking-tighter text-white transition-all group-hover:text-[#8B5CF6]">
+                      <span className="text-4xl font-black tabular-nums tracking-tighter text-white">
                         {lift.displayKg}
                       </span>
                       <span className="text-sm text-[#6B7280]">kg</span>

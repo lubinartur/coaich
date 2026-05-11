@@ -115,7 +115,6 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
       await db.workoutSessions.update(sessionId, { ratings: list });
       const profile = await getProfile();
       if (!profile) {
-        console.warn('Profile not found, skipping AI review');
         onComplete();
         return;
       }
