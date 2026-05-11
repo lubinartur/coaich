@@ -45,6 +45,11 @@
 }
 
 @layer components {
+  .safe-top-shell {
+    padding-top: env(safe-area-inset-top);
+    background-color: var(--color-bg);
+  }
+
   .glass {
     background: rgba(255, 255, 255, 0.03);
     backdrop-filter: blur(20px);
