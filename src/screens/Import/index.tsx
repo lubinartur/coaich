@@ -7,6 +7,7 @@ import {
   type WorkoutProgramTemplateKey,
 } from '@/constants/workoutPrograms';
 import ExercisePicker from '@/screens/Logger/ExercisePicker';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
 import { canonicalExerciseId, isPlankExerciseName } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, SetLog, WorkoutSession, WorkoutType } from '@/types';
@@ -144,6 +145,7 @@ export interface ImportScreenProps {
 }
 
 export default function ImportScreen({ onBack }: ImportScreenProps) {
+  const { t } = useTranslation();
   const [workoutDate, setWorkoutDate] = useState(todayDateInputValue);
   const [programKey, setProgramKey] = useState<WorkoutProgramTemplateKey>('pull');
   const [rows, setRows] = useState<ImportRow[]>(() => rowsFromTemplate('pull'));
@@ -211,6 +213,11 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
   const appendExerciseFromLibrary = (ex: Exercise) => {
     clearErrorFeedback();
     setRows((prev) => [...prev, importRowFromExercise(ex)]);
+  };
+
+  const removeExerciseRow = (rowIdx: number) => {
+    clearErrorFeedback();
+    setRows((prev) => prev.filter((_, i) => i !== rowIdx));
   };
 
   const saveWorkout = async (resetAfter: boolean): Promise<boolean> => {
@@ -394,13 +401,13 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             type="button"
             onClick={onBack}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-primary transition-colors active:scale-[0.98]"
-            aria-label="Back"
+            aria-label={t('back')}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 pt-0.5">
-            <h1 className="text-xl font-bold tracking-tight text-text-primary">Import Past Workouts</h1>
-            <p className="mt-1 text-sm text-text-secondary">Add recent workouts so AI knows your starting point</p>
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">{t('importPastWorkouts')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('importSubtitle')}</p>
           </div>
         </div>
       </header>
@@ -408,7 +415,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 pb-40 no-scrollbar">
         <div>
           <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-            When was this workout?
+            {t('whenWasThisWorkout')}
           </label>
           <input
             type="date"
@@ -422,7 +429,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
         </div>
 
         <div>
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-secondary">Program type</p>
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('programType')}</p>
           <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
             {PROGRAM_CARDS.map((p) => (
               <Card
@@ -449,7 +456,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
         </div>
 
         <div className="space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Exercises</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('exercisesLabel')}</p>
           {rows.map((row, idx) => {
             const isBw = row.equipment === 'bodyweight';
             const isPlank = isPlankExerciseName(row.name);
@@ -464,14 +471,11 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => updateRow(idx, { included: !row.included })}
-                    className={`shrink-0 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                      row.included
-                        ? 'border-accent bg-accent/15 text-accent'
-                        : 'border-border bg-surface text-text-secondary'
-                    }`}
+                    onClick={() => removeExerciseRow(idx)}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-red-500 transition-colors hover:border-red-500/40 hover:text-red-400"
+                    aria-label={`${t('remove')} ${row.name}`}
                   >
-                    {row.included ? 'Included' : 'Excluded'}
+                    <Trash2 className="h-4 w-4 text-red-500" aria-hidden />
                   </button>
                 </div>
                 {row.included ? (
@@ -524,7 +528,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                       onClick={() => addSet(idx)}
                       className="mt-1 w-full border border-border/50 bg-transparent px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-none hover:bg-surface/50 hover:text-text-primary"
                     >
-                      + ADD SET
+                      {t('addSetLabel')}
                     </Button>
                   </div>
                 ) : null}
@@ -541,7 +545,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             onClick={() => setPickerOpen(true)}
           >
             <Plus className="h-4 w-4 shrink-0" aria-hidden />
-            + Add Exercise
+            {t('addExercise')}
           </Button>
         </div>
 
@@ -590,7 +594,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             disabled={saving}
             onClick={() => void handleSave()}
           >
-            Save Workout
+            {t('save')}
           </Button>
           <Button
             type="button"
@@ -600,7 +604,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             disabled={saving}
             onClick={() => void handleAddAnother()}
           >
-            Add Another
+            {t('addAnother')}
           </Button>
           {feedback?.kind === 'error' ? (
             <p className="text-center text-sm font-medium leading-snug text-red-400">{feedback.message}</p>

@@ -21,6 +21,7 @@ The app is in a late-stage redesign/polish phase. The strongest product signals 
 3. `Today`, `Logger`, `Review`, `Progress`, `History`, and `Settings` have all received repeated layout and typography tuning.
 4. `Settings` now includes local JSON export/import backup flows, and language switching triggers `window.location.reload()` for immediate UI refresh.
 5. `BottomNav` has been converted into a floating pill nav and recent footer/button polish has been applied across `Logger` and `Review`.
+6. `History`, `EditWorkout`, and `Import` now also reflect the current polish pass with deletion flows, Russian copy updates, and tighter action/button consistency.
 
 ### Active work themes
 
@@ -29,6 +30,18 @@ The app is in a late-stage redesign/polish phase. The strongest product signals 
 - Finishing localization and language-specific polish, including Russian badge labels and localized short button copy.
 - Keeping the workout loop coherent after edits: `Today -> Logger -> Rating -> Review -> saved targets -> next workout`.
 - Cleaning up provider/docs drift where older Gemini/template references still exist while Anthropic remains the live code path.
+
+### Recent change sequence (2026-05-12)
+
+1. `Logger` Russian set naming was corrected from `ПОДХОД` to `СЕТ`, preserving numbered rows like `СЕТ 1`.
+2. `Logger` exercise delete affordance was made permanently red to match destructive-action styling.
+3. Local `/api/anthropic` development flow was fixed through the Vite dev proxy in `vite.config.ts`; requests now rewrite to `/v1/messages`, use `VITE_ANTHROPIC_API_KEY`, and `.env.example` was aligned to document the local key setup.
+4. `History` workout cards gained a destructive delete action that removes both `db.workoutSessions` entries and associated `db.aiReviews`.
+5. `Today` expandable exercise previews were simplified so the header keeps `СЕТ`, while each row now shows only the set number.
+6. `EditWorkout` cards were cleaned up: helper copy removed, per-row labels reduced to plain numbers, trash icon made red, and add-action buttons restyled to match `Logger`.
+7. `EditWorkout` primary copy was localized for Russian-facing UI: header, add exercise, add set, and save CTA now use the translation system.
+8. `Import` received the same localization pass for the main header/subtitle, date/program/exercise labels, save CTAs, and add-exercise text.
+9. `Import` exercise rows no longer use the old `Included`/`Excluded` pill toggle; they now use a red `Trash2` action that removes the row from the import list directly.
 
 ## Architecture
 
@@ -116,6 +129,8 @@ Localized screens:
 - `src/screens/Progress/index.tsx`
 - `src/screens/History/index.tsx`
 - `src/screens/Settings/index.tsx`
+- `src/screens/EditWorkout/index.tsx` (primary header/actions localized)
+- `src/screens/Import/index.tsx` (primary header/labels/actions localized)
 
 Notable localization details:
 
@@ -166,6 +181,7 @@ Base tokens from `src/index.css`:
 
 - Reads target recommendations from `db.exerciseTargets` first, then falls back to `previewExerciseTarget()`
 - Supports expandable exercise cards with set/weight/reps preview
+- Expanded target rows now show plain set numbers under the `СЕТ`/`SET` header instead of repeating the label on every row
 - Hides `operation` and `rest recommended` badges on rest days while still showing workout content and start CTA
 
 ### `Logger`
@@ -174,6 +190,25 @@ Base tokens from `src/index.css`:
 - Footer buttons are compact, equal-width, and language-aware
 - Rest timer is a floating pill overlay above the footer
 - Russian badge labels now render in the status pills without changing badge colors/styles
+- Russian singular set label now uses `СЕТ`
+
+### `History`
+
+- Workout cards now support destructive deletion directly from the list
+- Deleting a workout also deletes associated `aiReviews` rows for the same `sessionId`
+
+### `EditWorkout`
+
+- Header and primary CTAs are now localized through `src/i18n/translations.ts`
+- Exercise rows use compact numeric set labels instead of repeated `SET n` text
+- Destructive affordances are now visually clearer with a red exercise trash icon
+- Add-set and add-exercise controls were restyled to visually match `Logger`
+
+### `Import`
+
+- Main import labels and footer CTAs now participate in the translation system
+- Exercise rows use a red trash action instead of the older included/excluded badge toggle
+- The screen is moving toward the same logger/edit-workout interaction language for exercise management
 
 ### `Review`
 

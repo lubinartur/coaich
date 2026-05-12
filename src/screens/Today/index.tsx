@@ -586,9 +586,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
                                       key={`${ex.exerciseId}-target-${idx + 1}`}
                                       className="grid grid-cols-[42px_minmax(0,1fr)_64px] items-center gap-2"
                                     >
-                                      <span className="text-xs text-[#6B7280]">
-                                        {t('set')} {idx + 1}
-                                      </span>
+                                      <span className="text-xs text-[#6B7280]">{idx + 1}</span>
                                       <span className="text-center text-sm font-medium text-white">
                                         {ex.equipment === 'bodyweight'
                                           ? t('bodyweight')

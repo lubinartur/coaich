@@ -5,11 +5,6 @@ import type { MuscleGroup, Profile, WorkoutSession, WorkoutType } from '@/types'
 const COACH_CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
 const COACH_MAX_TOKENS = 1000;
 
-function viteEnv(key: string): string | undefined {
-  const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
-  return env[key];
-}
-
 export interface CoachPromptData {
   profile: Profile;
   lastSession: WorkoutSession | undefined;
@@ -174,7 +169,6 @@ export async function buildCoachPromptData(
 }
 
 export const generateCoachMessage = async (data: CoachPromptData): Promise<string> => {
-  const apiKey = viteEnv('VITE_ANTHROPIC_API_KEY');
   const fallback = `Ready for your ${data.recommendation.type} session today.`;
 
   const prompt = buildCoachPrompt(data);
@@ -184,10 +178,6 @@ export const generateCoachMessage = async (data: CoachPromptData): Promise<strin
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01',
     };
-
-    if (apiKey?.trim()) {
-      headers['x-api-key'] = apiKey.trim();
-    }
 
     const res = await fetch('/api/anthropic', {
       method: 'POST',

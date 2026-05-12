@@ -751,7 +751,7 @@ export default function LoggerScreen({
                     className="p-1 text-[#333333] transition-colors hover:text-red-400"
                     aria-label={`${t('remove')} ${ex.name}`}
                   >
-                    <Trash2 className="h-[18px] w-[18px]" aria-hidden />
+                    <Trash2 className="h-[18px] w-[18px] text-red-500" aria-hidden />
                   </button>
                 </div>
 

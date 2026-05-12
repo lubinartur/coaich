@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Calendar, ChevronRight } from 'lucide-react';
+import { Calendar, ChevronRight, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui';
 import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
@@ -57,20 +57,32 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const loadSessions = async () => {
+    const list = await db.workoutSessions.orderBy('startedAt').reverse().toArray();
+    setSessions(list);
+  };
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoading(true);
       const list = await db.workoutSessions.orderBy('startedAt').reverse().toArray();
-      if (!cancelled) {
-        setSessions(list);
-        setLoading(false);
-      }
+      if (cancelled) return;
+      setSessions(list);
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
   }, [refreshKey]);
+
+  const deleteSession = async (sessionId: string) => {
+    if (!window.confirm('Удалить тренировку?')) return;
+
+    await db.aiReviews.where('sessionId').equals(sessionId).delete();
+    await db.workoutSessions.delete(sessionId);
+    await loadSessions();
+  };
 
   if (loading) {
     return (
@@ -156,7 +168,24 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
                     ))}
                   </div>
                 </div>
-                <ChevronRight className="mt-0.5 h-5 w-5 shrink-0 text-[#6B7280]" aria-hidden />
+                <div className="flex shrink-0 items-center gap-3">
+                  <button
+                    type="button"
+                    className="rounded-md p-1 text-red-500 transition-opacity hover:opacity-80"
+                    aria-label={`${t('remove')} ${toDisplayName(w.workoutName)}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void deleteSession(s.id);
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                    }}
+                  >
+                    <Trash2 className="text-red-500 w-5 h-5" aria-hidden />
+                  </button>
+                  <ChevronRight className="mt-0.5 h-5 w-5 shrink-0 text-[#6B7280]" aria-hidden />
+                </div>
               </div>
             </div>
           );

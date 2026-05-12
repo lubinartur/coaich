@@ -266,13 +266,7 @@ function normalizeReviewFields(
   };
 }
 
-function viteEnv(key: string): string | undefined {
-  const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
-  return env[key];
-}
-
 export const generateWorkoutReview = async (data: ReviewPromptData): Promise<AIReview> => {
-  const apiKey = viteEnv('VITE_ANTHROPIC_API_KEY');
   const baseId = crypto.randomUUID();
   const generatedAt = new Date().toISOString();
 
@@ -283,10 +277,6 @@ export const generateWorkoutReview = async (data: ReviewPromptData): Promise<AIR
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01',
     };
-
-    if (apiKey?.trim()) {
-      headers['x-api-key'] = apiKey.trim();
-    }
 
     const res = await fetch('/api/anthropic', {
       method: 'POST',
