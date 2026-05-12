@@ -179,7 +179,16 @@ function looksLikeJsonText(rawText: string): boolean {
 function parseReviewResponseInternal(rawText: string, depth = 0): ParsedReviewShape | null {
   if (depth > 3) return null;
   const clean = stripJsonMarkers(rawText);
+  if (!clean) return null;
   const parsed = JSON.parse(clean) as unknown;
+  if (typeof parsed === 'string') {
+    const nestedText = stripJsonMarkers(parsed).trim();
+    if (!nestedText) return null;
+    if (looksLikeJsonText(nestedText)) {
+      return parseReviewResponseInternal(nestedText, depth + 1);
+    }
+    return emptyParsedReview(nestedText);
+  }
   if (!parsed || typeof parsed !== 'object') {
     return null;
   }
@@ -199,11 +208,12 @@ function parseReviewResponseInternal(rawText: string, depth = 0): ParsedReviewSh
 }
 
 const parseReviewResponse = (rawText: string): ParsedReviewShape => {
+  const clean = stripJsonMarkers(rawText).trim();
   try {
-    return parseReviewResponseInternal(rawText) ?? emptyParsedReview(rawText);
+    return parseReviewResponseInternal(clean) ?? emptyParsedReview(clean);
   } catch (err) {
     console.error('Failed to parse AI review:', err);
-    return emptyParsedReview(rawText);
+    return emptyParsedReview(clean);
   }
 };
 
