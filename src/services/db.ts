@@ -10,6 +10,15 @@ import type {
 } from '@/types';
 import { EXERCISE_SEED } from '@/constants/exercises';
 
+export interface CoachMemoryEntry {
+  id: string;
+  sessionId: string;
+  generatedAt: string;
+  weekNumber: number;
+  summary: string;
+  keyFindings: string[];
+}
+
 export class CoAIchDB extends Dexie {
   profile!: Table<Profile>;
   exercises!: Table<Exercise>;
@@ -18,6 +27,7 @@ export class CoAIchDB extends Dexie {
   exerciseTargets!: Table<ExerciseTarget>;
   programs!: Table<Program>;
   prRecords!: Table<PrRecord>;
+  coachMemory!: Table<CoachMemoryEntry>;
 
   constructor() {
     super('coaich-db');
@@ -35,6 +45,9 @@ export class CoAIchDB extends Dexie {
     });
     this.version(3).stores({
       prRecords: '++id, exerciseId, sessionId, achievedAt',
+    });
+    this.version(4).stores({
+      coachMemory: 'id, sessionId, generatedAt, weekNumber',
     });
   }
 }

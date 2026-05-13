@@ -4,6 +4,7 @@ import { Button } from '@/components/ui';
 import { useTranslation } from '@/hooks/useTranslation';
 import { db, getProfile } from '@/services/db';
 import { generateWorkoutReview } from '@/services/aiService';
+import { generateCoachInsights } from '@/services/aiService';
 import { canonicalExerciseId, previewExerciseTarget } from '@/services/progressionEngine';
 import type { ExerciseRating, NextTarget, WorkoutSession } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
@@ -150,6 +151,12 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
         sessionId: session.id,
         generatedAt,
       });
+      const recentSessions = await db.workoutSessions
+        .orderBy('finishedAt')
+        .reverse()
+        .limit(5)
+        .toArray();
+      void generateCoachInsights(session.id, session, review, recentSessions);
       for (const t of review.nextTargets) {
         const exId = canonicalExerciseId(t.exerciseId);
         await db.exerciseTargets.put({

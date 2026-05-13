@@ -2,6 +2,7 @@
 
 import { EXERCISE_SEED } from '@/constants/exercises';
 import { canonicalExerciseId, formatNextTargetLine, isTimedHoldExercise } from '@/services/progressionEngine';
+import { db, type CoachMemoryEntry } from '@/services/db';
 import type {
   AIReview,
   ExerciseRating,
@@ -339,5 +340,99 @@ export const generateWorkoutReview = async (data: ReviewPromptData): Promise<AIR
       nextTargets: [],
       exerciseNotes: [],
     };
+  }
+};
+
+function getISOWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+export const generateCoachInsights = async (
+  sessionId: string,
+  session: WorkoutSession,
+  review: AIReview,
+  recentSessions: WorkoutSession[],
+): Promise<void> => {
+  const prompt = `
+You are analyzing a workout and its review to extract coaching insights.
+Be specific and factual. Use real numbers. English only.
+
+CURRENT SESSION:
+- Type: ${session.type} (${session.name})
+- Duration: ${session.durationMinutes} min
+- Volume: ${session.totalVolume}kg
+- Exercises: ${session.exercises.map((e) => e.exerciseName).join(', ')}
+
+REVIEW OUTCOME:
+- Went well: ${review.wentWell.join('; ')}
+- To improve: ${review.toImprove.join('; ')}
+- Exercise notes: ${review.exerciseNotes.map((n) => `${n.exerciseName}: ${n.note}`).join('; ')}
+
+RECENT HISTORY (last ${recentSessions.length} sessions):
+${recentSessions
+  .map((s) => `- ${s.name} on ${s.finishedAt.slice(0, 10)}: ${s.totalVolume}kg total`)
+  .join('\n')}
+
+Extract coaching insights. Respond ONLY in JSON, no markdown, no backticks:
+{
+  "summary": "3-5 sentences about this athlete's current state, trends, and what to watch.",
+  "keyFindings": [
+    "Specific finding 1 with numbers if possible",
+    "Specific finding 2",
+    "Specific finding 3"
+  ]
+}
+
+Rules:
+- keyFindings: 3-5 items max, each under 12 words
+- summary: factual, no fluff, reference real numbers
+- English only
+`;
+
+  try {
+    const res = await fetch('/api/anthropic', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) return;
+
+    const rawJson = await res.json().catch(() => ({}));
+    const content = (rawJson as { content?: { type: string; text?: string }[] }).content;
+    const textBlock = content?.find((c) => c.type === 'text');
+    const rawText = textBlock?.text ?? '';
+    const clean = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(clean) as { summary?: string; keyFindings?: string[] };
+
+    const entry: CoachMemoryEntry = {
+      id: crypto.randomUUID(),
+      sessionId,
+      generatedAt: new Date().toISOString(),
+      weekNumber: getISOWeekNumber(new Date()),
+      summary: parsed.summary ?? '',
+      keyFindings: Array.isArray(parsed.keyFindings) ? parsed.keyFindings : [],
+    };
+
+    await db.coachMemory.add(entry);
+
+    const all = await db.coachMemory.orderBy('generatedAt').toArray();
+    if (all.length > 10) {
+      const toDelete = all.slice(0, all.length - 10).map((e) => e.id);
+      await db.coachMemory.bulkDelete(toDelete);
+    }
+  } catch (err) {
+    console.error('generateCoachInsights failed', err);
   }
 };

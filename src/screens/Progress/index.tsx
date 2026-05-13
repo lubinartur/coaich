@@ -251,6 +251,10 @@ export default function ProgressScreen() {
                 lift.liftSessionCount >= 2 &&
                 lift.changeTone === 'success' &&
                 lift.changeText !== '+0kg';
+              const showRegressionBadge =
+                lift.liftSessionCount >= 2 &&
+                lift.changeTone === 'danger' &&
+                lift.changeText !== '+0kg';
               return (
                 <div key={lift.exerciseId} className="group">
                   <span className="mb-2 block text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
@@ -267,6 +271,12 @@ export default function ProgressScreen() {
                       <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/10 px-2 py-1">
                         <TrendingUp className="h-3 w-3 text-[#22C55E]" aria-hidden />
                         <span className="text-[10px] font-black text-[#22C55E]">{lift.changeText}</span>
+                      </div>
+                    ) : null}
+                    {showRegressionBadge ? (
+                      <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#EF4444]/20 bg-[#EF4444]/10 px-2 py-1">
+                        <TrendingDown className="h-3 w-3 text-[#EF4444]" aria-hidden />
+                        <span className="text-[10px] font-black text-[#EF4444]">{lift.changeText}</span>
                       </div>
                     ) : null}
                   </div>

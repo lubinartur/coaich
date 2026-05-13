@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, Check, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
 import { Button, Card } from '@/components/ui';
 import type { LoggerTemplateExercise } from '@/constants/workoutPrograms';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -10,7 +24,6 @@ import {
   canonicalExerciseId,
   formatTargetLineForExercise,
   getLastPerformedSummary,
-  getRecLastLayout,
   isTimedHoldExercise,
   parseRecommendLine,
   previewExerciseTarget,
@@ -18,74 +31,16 @@ import {
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession, WorkoutType } from '@/types';
 import ExercisePicker, { type ExercisePickerFilter } from '@/screens/Logger/ExercisePicker';
+import SortableExercise from '@/screens/Logger/SortableExercise';
+import {
+  fieldInputClass,
+  getRecommendBadgeConfig,
+  setActionsBtnClass,
+  type LoggerExercise,
+  type RecommendBadgeConfig,
+  type SetRow,
+} from '@/screens/Logger/shared';
 import { toDisplayName } from '@/utils/toDisplayName';
-
-type SetRow = {
-  id: string;
-  weight: string;
-  reps: string;
-  completed: boolean;
-  /** True when this completed set beats all prior Dexie history + other sets this workout. */
-  isPR?: boolean;
-};
-
-type LoggerExercise = {
-  exerciseId: string;
-  muscleGroup: MuscleGroup;
-  name: string;
-  equipment: Exercise['equipment'];
-  /** Timed hold: reps field is seconds. */
-  timedHold: boolean;
-  recommend: string;
-  last: string;
-  progressionStatus: ProgressionStatus;
-  sets: SetRow[];
-};
-
-type RecommendBadgeConfig = {
-  label: 'REC' | 'HOLD' | 'BASE' | 'DELOAD';
-  badgeClass: string;
-  dotClass: string;
-  pulse: boolean;
-};
-
-function getRecommendBadgeConfig(rawLabel: string): RecommendBadgeConfig {
-  const normalized = rawLabel.replace(':', '').trim().toUpperCase();
-  switch (normalized) {
-    case 'HOLD':
-      return {
-        label: 'HOLD',
-        badgeClass:
-          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#F59E0B]/40 bg-[#F59E0B]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#F59E0B]',
-        dotClass: 'bg-[#F59E0B]',
-        pulse: false,
-      };
-    case 'BASE':
-      return {
-        label: 'BASE',
-        badgeClass:
-          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#6B7280]/40 bg-[#6B7280]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#6B7280]',
-        dotClass: 'bg-[#6B7280]',
-        pulse: false,
-      };
-    case 'DELOAD':
-      return {
-        label: 'DELOAD',
-        badgeClass:
-          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#60A5FA]/40 bg-[#60A5FA]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#60A5FA]',
-        dotClass: 'bg-[#60A5FA]',
-        pulse: false,
-      };
-    default:
-      return {
-        label: 'REC',
-        badgeClass:
-          'inline-flex items-center gap-1 rounded-full overflow-hidden border border-[#8B5CF6]/40 bg-[#8B5CF6]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#8B5CF6]',
-        dotClass: 'bg-[#8B5CF6]',
-        pulse: true,
-      };
-  }
-}
 
 function makeId(): string {
   return Math.random().toString(36).slice(2, 11);
@@ -310,11 +265,6 @@ function buildSessionExercises(exercises: LoggerExercise[]): SessionExercise[] {
   });
 }
 
-const fieldInputClass =
-  'min-h-[64px] w-full min-w-0 rounded-xl border border-[#222222] bg-[#111111] px-2 py-5 text-center font-black tabular-nums text-2xl text-white outline-none transition-all focus:border-[#8B5CF6] focus:ring-4 focus:ring-[#8B5CF6]/10';
-
-const setActionsBtnClass =
-  'flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#222222] bg-[#111111] py-3.5 text-xs font-semibold text-[#6B7280] transition-all hover:bg-[#181818] hover:border-[#8B5CF6]/25 hover:text-[#8B5CF6] active:scale-[0.98]';
 
 function formatRestMmSs(totalSec: number): string {
   const s = Math.max(0, totalSec);
@@ -548,6 +498,22 @@ export default function LoggerScreen({
     setExercises((prev) => prev.filter((_, i) => i !== exIdx));
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setExercises((prev) => {
+      const oldIndex = prev.findIndex((_, i) => `ex-${i}` === active.id);
+      const newIndex = prev.findIndex((_, i) => `ex-${i}` === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+  };
+
   const addSet = (exIdx: number) => {
     setExercises((prev) => {
       const next = prev.map((ex, i) =>
@@ -717,169 +683,26 @@ export default function LoggerScreen({
             <p className="text-sm text-[#6B7280]">{t('noExercisesYet')}</p>
           </div>
         ) : (
-          exercises.map((ex, exIdx) => {
-            const hasLastData = (() => {
-              const last = ex.last.trim();
-              return last !== '' && last !== '—' && last !== '-' && last !== '–';
-            })();
-            const recLastLayout = getRecLastLayout(
-              ex.recommend.trim(),
-              ex.last.trim(),
-              ex.progressionStatus,
-            );
-            const isBw = ex.equipment === 'bodyweight';
-            const isTimed = ex.timedHold;
-            const recommendValue = recLastLayout.kind === 'unified' ? recLastLayout.value : ex.recommend.trim();
-            const recommendBadge = ex.recommend.trim()
-              ? getRecommendBadgeConfig(recLastLayout.kind === 'unified' ? recLastLayout.label : 'REC')
-              : null;
-            return (
-              <section key={`${ex.exerciseId}-${exIdx}`} className="space-y-6">
-                <div className="flex items-end justify-between border-b border-[#222222] pb-4">
-                  <div>
-                    <h3 className="text-2xl font-bold tracking-tight text-white">{toDisplayName(ex.name)}</h3>
-                    <div className="mt-3 space-y-1 text-[12px] font-bold tracking-wide text-[#6B7280]">
-                      {recommendBadge && recommendValue ? (
-                        <div className="flex items-center gap-2">
-                          <span className={recommendBadge.badgeClass}>
-                            <span
-                              className={`h-1.5 w-1.5 rounded-full ${recommendBadge.dotClass} ${
-                                recommendBadge.pulse ? 'animate-pulse' : ''
-                              }`}
-                              aria-hidden
-                            />
-                            <span>{getBadgeLabel(recommendBadge.label)}</span>
-                          </span>
-                          <span className="text-sm font-medium text-[#8B5CF6]">{recommendValue}</span>
-                        </div>
-                      ) : null}
-                      {recLastLayout.kind === 'dual' && hasLastData ? (
-                        <p className="font-mono">
-                          {t('last')} {ex.last}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRemoveConfirm({ exIdx, name: ex.name })}
-                    className="p-2.5 text-[#333333] transition-colors hover:text-red-400"
-                    aria-label={`${t('remove')} ${ex.name}`}
-                  >
-                    <Trash2 className="h-[18px] w-[18px] text-red-500" aria-hidden />
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  <div
-                    className={`grid items-end gap-3 px-1 pb-1 pt-0 text-[10px] font-black uppercase tracking-widest text-[#6B7280] sm:gap-4 ${
-                      isBw
-                        ? 'grid-cols-[32px_minmax(0,1fr)_52px]'
-                        : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]'
-                    }`}
-                  >
-                    <span aria-hidden className="block min-h-[1em]" />
-                    {!isBw ? (
-                      <>
-                        <span className="block text-center">{t('weight')}</span>
-                        <span className="flex justify-center" aria-hidden>
-                          ×
-                        </span>
-                        <span className="block text-center">{t('reps')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="block text-center">{isTimed ? t('sec') : t('reps')}</span>
-                        <span aria-hidden className="block min-h-[1em]" />
-                      </>
-                    )}
-                    {!isBw ? <span aria-hidden className="block min-h-[1em]" /> : null}
-                  </div>
-                  <div className="space-y-5">
-                    {ex.sets.map((set, setIdx) => (
-                      <motion.div
-                        layout
-                        key={set.id}
-                        className={`grid items-center gap-3 rounded-2xl px-1 py-3 transition-all sm:gap-4 ${
-                          isBw
-                            ? 'grid-cols-[32px_minmax(0,1fr)_52px]'
-                            : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]'
-                        } ${set.completed ? 'border border-[#22C55E]/10 bg-[#22C55E]/5' : 'bg-transparent'}`}
-                      >
-                        <div className="text-center">
-                          <span className="block text-[10px] font-black text-[#6B7280]">{t('set')}</span>
-                          <span className="text-sm font-black tabular-nums text-white">{setIdx + 1}</span>
-                        </div>
-                        {!isBw ? (
-                          <>
-                            <div className="min-w-0">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                autoComplete="off"
-                                placeholder="0"
-                                className={fieldInputClass}
-                                value={set.weight}
-                                onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value)}
-                                onFocus={(e) => e.currentTarget.select()}
-                              />
-                            </div>
-                            <span className="flex shrink-0 items-center justify-center font-black text-[#333333]">×</span>
-                          </>
-                        ) : null}
-                        <div className="min-w-0">
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            autoComplete="off"
-                            placeholder="0"
-                            aria-label={isTimed ? t('seconds') : t('reps')}
-                            className={fieldInputClass}
-                            value={set.reps}
-                            onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
-                            onFocus={(e) => e.currentTarget.select()}
-                          />
-                        </div>
-                        <div className="flex min-w-0 items-stretch justify-end">
-                          <button
-                            type="button"
-                            aria-label={set.completed ? t('uncompleteSet') : t('completeSet')}
-                            className={`flex min-h-[64px] w-[52px] shrink-0 items-center justify-center rounded-xl border shadow-lg transition-all ${
-                              set.completed
-                                ? 'border-[#22C55E] bg-[#22C55E] text-white shadow-[#22C55E]/20'
-                                : 'border-[#222222] bg-[#111111] text-[#333333] hover:border-[#8B5CF6]'
-                            }`}
-                            onClick={() => toggleSetComplete(exIdx, setIdx)}
-                          >
-                            <Check className="h-6 w-6" strokeWidth={4} />
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => addSet(exIdx)}
-                    className={setActionsBtnClass}
-                  >
-                    <Plus className="h-4 w-4 shrink-0" aria-hidden />
-                  {t('add').replace(/^\+\s*/, '')}
-                  </button>
-                  <button
-                    type="button"
-                    className={setActionsBtnClass}
-                    onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
-                  >
-                    <ArrowLeftRight className="h-4 w-4 shrink-0" aria-hidden />
-                  {t('swap')}
-                  </button>
-                </div>
-              </section>
-            );
-          })
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={exercises.map((_, i) => `ex-${i}`)} strategy={verticalListSortingStrategy}>
+              {exercises.map((ex, exIdx) => (
+                <SortableExercise
+                  key={`ex-${exIdx}`}
+                  sortableId={`ex-${exIdx}`}
+                  ex={ex}
+                  exIdx={exIdx}
+                  updateSet={updateSet}
+                  toggleSetComplete={toggleSetComplete}
+                  addSet={addSet}
+                  openPickerForSwap={openPickerForSwap}
+                  setRemoveConfirm={setRemoveConfirm}
+                  t={t}
+                  lang={lang}
+                  getBadgeLabel={getBadgeLabel}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 

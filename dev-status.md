@@ -52,6 +52,8 @@ Full UI audit fixes:
 9. Overlay header titles were unified to `text-lg font-bold` across `Logger`, `Rating`, `Review`, `EditWorkout`, and `Import`.
 10. Trash tap targets in `Logger` (per-exercise) and `History` were enlarged from `p-1` to `p-2.5` so the hit area reaches ~44px.
 11. `Logger` now scrolls to the top on mount via `useEffect(() => { window.scrollTo(0, 0); }, [])`, so opening a workout always lands at the header.
+12. Deload threshold now scales with training frequency in `checkDeloadNeeded` (`src/services/progressionEngine.ts`): if average sessions per week over the last 4 weeks is `< 3`, the consecutive-week threshold is raised from `4 → 8` (natural) and `6 → 10` (on cycle); the Dexie lookup window was widened to 10 weeks accordingly.
+13. Onboarding benchmark lifts are now seeded into `db.exerciseTargets` at the end of onboarding via `seedInitialTargetsFromProfile()` (called from `src/screens/Onboarding/index.tsx` right after `db.profile.put(finalProfile)`); each present, positive 10RM (`benchPress10RM`, `squat10RM`, `deadlift10RM`) writes `{ weight, reps: 10, sets: 3, source: 'progression_engine' }` for `barbell-bench-press` / `back-squat` / `deadlift`.
 
 Earlier in this cycle (2026-05-12):
 
@@ -73,7 +75,6 @@ Earlier in this cycle (2026-05-12):
 - Dumbbell weights are not auto-doubled in volume math; users enter the total they intend to lift.
 - No cloud sync and no authentication; all data remains in browser-local Dexie/IndexedDB.
 - `Progress` does not surface negative deltas — regressions on benchmark lifts are silently hidden.
-- Onboarding benchmark lifts (`benchPress10RM`, `squat10RM`, `deadlift10RM`) are not yet seeded into `db.exerciseTargets` at the end of onboarding.
 - A nested `coaich/` subfolder exists in the repo root as a leftover nested clone artifact; it is harmless and not deployed.
 
 ## Architecture

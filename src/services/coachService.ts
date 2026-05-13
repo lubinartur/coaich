@@ -11,6 +11,7 @@ export interface CoachPromptData {
   hoursSinceLast: number;
   recommendation: { type: string; name: string; reasoning: string };
   weeklyVolume: Record<string, number>;
+  memoryFindings?: string[];
 }
 
 export type RecommendedWorkoutType = 'push' | 'pull' | 'legs' | 'full_body';
@@ -51,7 +52,12 @@ WEEKLY VOLUME STATUS:
 ${Object.entries(data.weeklyVolume)
   .map(([muscle, sets]) => `${muscle}: ${sets} sets`)
   .join(', ')}
-
+${data.memoryFindings && data.memoryFindings.length > 0
+  ? `
+ATHLETE MEMORY (patterns from recent sessions):
+${data.memoryFindings.map((f) => `- ${f}`).join('\n')}
+`
+  : ''}
 ---
 
 Write ONE short paragraph (2 sentences) explaining why this workout is recommended today.
@@ -171,7 +177,20 @@ export async function buildCoachPromptData(
 export const generateCoachMessage = async (data: CoachPromptData): Promise<string> => {
   const fallback = `Ready for your ${data.recommendation.type} session today.`;
 
-  const prompt = buildCoachPrompt(data);
+  let memoryFindings: string[] = [];
+  try {
+    const entries = await db.coachMemory
+      .orderBy('generatedAt')
+      .reverse()
+      .limit(4)
+      .toArray();
+    memoryFindings = entries.flatMap((e) => e.keyFindings).slice(0, 20);
+  } catch {
+    // memory table may be empty on first use
+  }
+
+  const promptData: CoachPromptData = { ...data, memoryFindings };
+  const prompt = buildCoachPrompt(promptData);
 
   try {
     const headers: Record<string, string> = {
