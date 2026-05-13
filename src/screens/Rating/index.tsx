@@ -199,7 +199,7 @@ export default function RatingScreen({ sessionId, onComplete, onBack }: RatingSc
             <ArrowLeft className="h-6 w-6" />
           </button>
         </div>
-        <h1 className="text-3xl font-bold text-white">{t('howDidItGo')}</h1>
+        <h1 className="text-lg font-bold text-white">{t('howDidItGo')}</h1>
         <p className="mt-2 text-sm text-[#6B7280]">{t('rateBeforeReview')}</p>
       </header>
 

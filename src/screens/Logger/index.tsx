@@ -341,8 +341,11 @@ export default function LoggerScreen({
   onClose,
 }: LoggerScreenProps) {
   const { t, lang } = useTranslation();
-  const [startedAt] = useState(() => new Date().toISOString());
-  const [seconds, setSeconds] = useState(0);
+  /** Wall-clock start when user taps Start; used for saved duration (accurate when backgrounded). */
+  const [workoutStartMs, setWorkoutStartMs] = useState<number | null>(null);
+  const [sessionStartedAtIso, setSessionStartedAtIso] = useState<string | null>(null);
+  /** Bumps once per second while workout is running so the header re-reads Date.now() (not used to accumulate duration). */
+  const [, setClockTick] = useState(0);
   /** Workout clock runs only after the user taps Start Session (not on mount). */
   const [isStarted, setIsStarted] = useState(false);
   const [exercises, setExercises] = useState<LoggerExercise[]>(() => skeletonFromTemplate(exerciseTemplate));
@@ -390,6 +393,10 @@ export default function LoggerScreen({
   })();
 
   useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void getProfile().then((p) => {
       if (cancelled || !p) return;
@@ -424,13 +431,15 @@ export default function LoggerScreen({
     };
   }, [workoutName, workoutType, templateKey, exerciseTemplate]);
 
+  /** Re-sync header elapsed when returning from background; no interval for workout wall time. */
   useEffect(() => {
-    if (!isStarted) return undefined;
-    const id = window.setInterval(() => {
-      setSeconds((s) => s + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [isStarted]);
+    if (workoutStartMs == null) return undefined;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setClockTick((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [workoutStartMs]);
 
   useEffect(() => {
     if (restRemaining === null) return undefined;
@@ -601,14 +610,16 @@ export default function LoggerScreen({
   const handleFinish = async () => {
     if (exercises.length === 0) return;
     const id = crypto.randomUUID();
-    const finishedAt = new Date().toISOString();
-    const durationMinutes = Math.max(1, Math.ceil(seconds / 60));
+    const finishedAtMs = Date.now();
+    const finishedAt = new Date(finishedAtMs).toISOString();
+    const startMs = workoutStartMs ?? finishedAtMs;
+    const durationMinutes = Math.max(1, Math.round((finishedAtMs - startMs) / 60000));
     const totalVolume = computeTotalVolume(exercises);
     const session: WorkoutSession = {
       id,
       name: workoutName,
       type: toWorkoutType(workoutType),
-      startedAt,
+      startedAt: sessionStartedAtIso ?? new Date(startMs).toISOString(),
       finishedAt,
       durationMinutes,
       totalVolume,
@@ -691,7 +702,11 @@ export default function LoggerScreen({
           </button>
           <div>
             <h1 className="text-lg font-bold text-white">{localizedWorkoutName}</h1>
-            <p className="font-mono text-sm font-medium tabular-nums text-[#8B5CF6]">{formatElapsed(seconds)}</p>
+            <p className="font-mono text-sm font-medium tabular-nums text-[#8B5CF6]">
+              {formatElapsed(
+                workoutStartMs == null ? 0 : Math.max(0, Math.floor((Date.now() - workoutStartMs) / 1000)),
+              )}
+            </p>
           </div>
         </div>
       </header>
@@ -748,7 +763,7 @@ export default function LoggerScreen({
                   <button
                     type="button"
                     onClick={() => setRemoveConfirm({ exIdx, name: ex.name })}
-                    className="p-1 text-[#333333] transition-colors hover:text-red-400"
+                    className="p-2.5 text-[#333333] transition-colors hover:text-red-400"
                     aria-label={`${t('remove')} ${ex.name}`}
                   >
                     <Trash2 className="h-[18px] w-[18px] text-red-500" aria-hidden />
@@ -916,7 +931,12 @@ export default function LoggerScreen({
           <button
             type="button"
             disabled={exercises.length === 0}
-            onClick={() => setIsStarted(true)}
+            onClick={() => {
+              const ms = Date.now();
+              setWorkoutStartMs(ms);
+              setSessionStartedAtIso(new Date(ms).toISOString());
+              setIsStarted(true);
+            }}
             className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#22C55E] py-5 text-sm font-bold text-white shadow-lg shadow-[#22C55E]/25 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {startFooterLabel}

@@ -280,8 +280,8 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 bg-[#0A0A0A] px-6 pb-24 pt-10">
-        <h1 className="text-3xl font-bold text-white">{t('settings')}</h1>
+      <div className="flex flex-col gap-6 bg-transparent px-6 pb-24 pt-8">
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('settings')}</h1>
         <p className="text-sm text-[#6B7280]">{t('loading')}</p>
       </div>
     );
@@ -289,8 +289,8 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
 
   if (!profile) {
     return (
-      <div className="flex flex-col gap-6 bg-[#0A0A0A] px-6 pb-24 pt-10">
-        <h1 className="text-3xl font-bold text-white">{t('settings')}</h1>
+      <div className="flex flex-col gap-6 bg-transparent px-6 pb-24 pt-8">
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('settings')}</h1>
         <p className="text-sm text-[#6B7280]">{t('noProfileFound')}</p>
       </div>
     );
@@ -309,9 +309,9 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     }`;
 
   return (
-    <div className="animate-in fade-in flex flex-col gap-8 bg-[#0A0A0A] px-6 pb-24 pt-10 duration-500">
+    <div className="animate-in fade-in flex flex-col gap-8 bg-transparent px-6 pb-24 pt-8 duration-500">
       <header>
-        <h1 className="text-3xl font-bold text-white">{t('settings')}</h1>
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('settings')}</h1>
       </header>
 
       {sheet ? (

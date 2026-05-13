@@ -135,7 +135,7 @@ export default function ProgressScreen() {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 px-6 pb-32 pt-10">
+      <div className="flex flex-col gap-6 px-6 pb-32 pt-8">
         <header>
           <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
         </header>
@@ -146,7 +146,7 @@ export default function ProgressScreen() {
 
   if (!metrics) {
     return (
-      <div className="flex flex-col gap-6 px-6 pb-32 pt-10">
+      <div className="flex flex-col gap-6 px-6 pb-32 pt-8">
         <header>
           <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
           <p className="mt-1 font-medium tracking-tight text-[#6B7280]">{t('yourProgressOverTime')}</p>
@@ -178,7 +178,7 @@ export default function ProgressScreen() {
   );
 
   return (
-    <div className="animate-in fade-in space-y-12 px-6 pb-32 pt-10 duration-700">
+    <div className="animate-in fade-in space-y-12 px-6 pb-32 pt-8 duration-700">
       <header>
         <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
         <p className="mt-1 font-medium tracking-tight text-[#6B7280]">{t('yourProgressOverTime')}</p>

@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Profile, TrainingEnvironment } from '@/types';
 import { db } from '@/services/db';
+import { seedInitialTargetsFromProfile } from '@/services/progressionEngine';
 
 const STEPS = 7;
 
@@ -227,6 +228,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
 
     const finalProfile = mapOnboardingDraftToDexieProfile(draft);
     await db.profile.put(finalProfile);
+    await seedInitialTargetsFromProfile(finalProfile);
     onComplete();
   };
 

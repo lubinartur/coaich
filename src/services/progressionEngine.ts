@@ -614,6 +614,31 @@ async function persistTarget(exerciseId: string, pick: Pick<ExerciseTarget, 'wei
 }
 
 /**
+ * Seed initial `exerciseTargets` from onboarding 10RM calibration values.
+ * - benchPress10RM → `barbell-bench-press` (weight = value, reps = 10, sets = 3)
+ * - squat10RM     → `back-squat`           (weight = value, reps = 10, sets = 3)
+ * - deadlift10RM  → `deadlift`             (weight = value, reps = 10, sets = 3)
+ *
+ * Source is `progression_engine`. Missing/non-positive values are skipped.
+ */
+export async function seedInitialTargetsFromProfile(profile: Profile): Promise<void> {
+  const seeds: { exerciseId: string; weight: number | undefined }[] = [
+    { exerciseId: 'barbell-bench-press', weight: profile.benchPress10RM },
+    { exerciseId: 'back-squat', weight: profile.squat10RM },
+    { exerciseId: 'deadlift', weight: profile.deadlift10RM },
+  ];
+
+  for (const seed of seeds) {
+    if (typeof seed.weight !== 'number' || !Number.isFinite(seed.weight) || seed.weight <= 0) continue;
+    await persistTarget(canonicalExerciseId(seed.exerciseId), {
+      weight: seed.weight,
+      reps: 10,
+      sets: 3,
+    });
+  }
+}
+
+/**
  * Last performance line for UI (most recent session containing this exercise).
  */
 export async function getLastPerformedSummary(exerciseId: string): Promise<string | null> {

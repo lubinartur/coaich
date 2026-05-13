@@ -176,11 +176,6 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     }
   };
 
-  const getOperationLabel = (type: RecommendedWorkoutType | null) => {
-    if (!type) return '…';
-    return getProgramLabel(type).toUpperCase();
-  };
-
   const getBadgeLabel = (label: TodayStatusBadge['label']) => {
     switch (label) {
       case 'HOLD':
@@ -501,23 +496,13 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         <div className="space-y-6 rounded-[31px] bg-[#181818] p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                {!isRestRecommended ? (
-                  <div className="inline-flex items-center gap-2 rounded-md border border-[#333333] bg-[#222222] px-2 py-1">
-                    <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8B5CF6]" />
-                    <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
-                      {t('operation')}: {getOperationLabel(displayWorkoutType)}
-                    </span>
-                  </div>
-                ) : null}
-                {reco?.isDeload ? (
-                  <>
-                    <span className="rounded-md border border-[#60A5FA]/30 bg-[#60A5FA]/15 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#60A5FA]">
-                      {t('deloadWeek')}
-                    </span>
-                  </>
-                ) : null}
-              </div>
+              {reco?.isDeload ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="rounded-md border border-[#60A5FA]/30 bg-[#60A5FA]/15 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-[#60A5FA]">
+                    {t('deloadWeek')}
+                  </span>
+                </div>
+              ) : null}
               <h2 className="text-4xl font-black tracking-tighter text-white">
                 {displayWorkoutType ? workoutCardTitle || '…' : '…'}
               </h2>

@@ -17,7 +17,7 @@ const tabs: { id: BottomNavTab; label: string; icon: LucideIcon }[] = [
 export function BottomNav({ active, onChange }: BottomNavProps) {
   return (
     <nav
-      className="pointer-events-auto fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#2A2A2A] bg-[#1C1C1C] px-6 py-3 shadow-2xl shadow-black/50"
+      className="pointer-events-auto fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-6 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.35),0_0_48px_-10px_rgba(139,92,246,0.18)] backdrop-blur-xl"
       aria-label="Main"
     >
       {tabs.map(({ id, label, icon: Icon }) => {

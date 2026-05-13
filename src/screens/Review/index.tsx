@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Loader2,
   MessageSquare,
   Sparkles,
   Trophy,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import type { TranslationKey } from '@/i18n/translations';
 import { db } from '@/services/db';
 import { canonicalExerciseId } from '@/services/progressionEngine';
 import type { AIReview, PrRecord, WorkoutSession } from '@/types';
@@ -41,33 +44,6 @@ function formatStatVolumeKg(volKg: number, locale: string): string {
   const rounded = Math.round(volKg);
   return rounded >= 1000 ? rounded.toLocaleString(locale) : String(rounded);
 }
-
-const LOG_EXERCISES = [
-  {
-    name: 'Lat Pulldown',
-    sets: [
-      { n: 1, w: 65, r: 12 },
-      { n: 2, w: 65, r: 12 },
-      { n: 3, w: 70, r: 10 },
-    ],
-  },
-  {
-    name: 'Barbell Row',
-    sets: [
-      { n: 1, w: 70, r: 10 },
-      { n: 2, w: 70, r: 10 },
-      { n: 3, w: 70, r: 9 },
-    ],
-  },
-  {
-    name: 'Bicep Curl',
-    sets: [
-      { n: 1, w: 22, r: 10 },
-      { n: 2, w: 22, r: 10 },
-      { n: 3, w: 22, r: 10 },
-    ],
-  },
-] as const;
 
 function exerciseVolumeKg(sets: { w: number; r: number; completed: boolean }[]): number {
   return sets.filter((s) => s.completed).reduce((a, s) => a + s.w * s.r, 0);
@@ -102,7 +78,7 @@ function extractReviewIntro(rawText: string, depth = 0): string {
 }
 
 const SECTION_HEADER_CLASS = 'text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]';
-const WORKOUT_TITLE_CLASS = 'text-4xl font-black tracking-tight text-white';
+const OVERLAY_HEADER_TITLE_CLASS = 'text-lg font-bold text-white';
 const BODY_TEXT_CLASS = 'text-base font-normal leading-relaxed text-[#AAAAAA]';
 const EXERCISE_NAME_CLASS = 'text-base font-bold text-white';
 const STAT_NUMBER_CLASS = 'text-3xl font-black tracking-tight text-white';
@@ -127,6 +103,15 @@ function prWeightSubtitle(r: PrRecord, kgUnit: string, repsLabel: string): strin
   return `${reps} ${repsLabel}`;
 }
 
+function dashStatTiles(t: (k: TranslationKey) => string): StatTile[] {
+  return [
+    { label: t('volume'), value: '—' },
+    { label: t('sets'), value: '—' },
+    { label: t('exercises'), value: '—' },
+    { label: t('duration'), value: '—' },
+  ];
+}
+
 export default function ReviewScreen({
   sessionId,
   workoutName,
@@ -135,9 +120,10 @@ export default function ReviewScreen({
   onEditWorkout,
   dataRefreshKey = 0,
 }: ReviewScreenProps) {
-  const { t, lang, locale } = useTranslation();
+  const { t, locale } = useTranslation();
   const [expandedLogKeys, setExpandedLogKeys] = useState<string[]>([]);
   const [session, setSession] = useState<WorkoutSession | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(() => Boolean(sessionId));
   const [prRecords, setPrRecords] = useState<PrRecord[]>([]);
   const [coachReview, setCoachReview] = useState<AIReview | null>(null);
   const [coachLoading, setCoachLoading] = useState(() => Boolean(sessionId));
@@ -145,11 +131,16 @@ export default function ReviewScreen({
   useEffect(() => {
     if (!sessionId) {
       setSession(null);
+      setSessionLoading(false);
       return;
     }
     let cancelled = false;
+    setSessionLoading(true);
     void db.workoutSessions.get(sessionId).then((s) => {
-      if (!cancelled) setSession(s ?? null);
+      if (!cancelled) {
+        setSession(s ?? null);
+        setSessionLoading(false);
+      }
     });
     return () => {
       cancelled = true;
@@ -216,13 +207,11 @@ export default function ReviewScreen({
   }, [prRecords, session, t]);
 
   const displayStats = useMemo((): StatTile[] => {
+    if (sessionId && sessionLoading) {
+      return [];
+    }
     if (!session) {
-      return [
-        { label: t('volume'), value: '420' },
-        { label: t('sets'), value: '18' },
-        { label: t('exercises'), value: '6' },
-        { label: t('duration'), value: formatDurationMinutes(65, t('hourShort'), t('minuteShort')) },
-      ];
+      return dashStatTiles(t);
     }
     const setCount = session.exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
     const volKg = session.totalVolume;
@@ -233,16 +222,10 @@ export default function ReviewScreen({
       { label: t('exercises'), value: String(session.exercises.length) },
       { label: t('duration'), value: formatDurationMinutes(durMin, t('hourShort'), t('minuteShort')) },
     ];
-  }, [locale, session, t]);
+  }, [locale, session, sessionId, sessionLoading, t]);
 
   const logExercises = useMemo(() => {
-    if (!session) {
-      return LOG_EXERCISES.map((ex) => ({
-        key: ex.name,
-        name: ex.name,
-        sets: ex.sets.map((st) => ({ n: st.n, w: st.w, r: st.r, completed: true })),
-      }));
-    }
+    if (!session) return [];
     return session.exercises.map((ex) => ({
       key: ex.exerciseId,
       name: ex.exerciseName,
@@ -255,6 +238,8 @@ export default function ReviewScreen({
     }));
   }, [session]);
 
+  const showStatsLoading = Boolean(sessionId && sessionLoading);
+
   const toggleLogExpand = (key: string) => {
     setExpandedLogKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   };
@@ -262,39 +247,51 @@ export default function ReviewScreen({
   return (
     <div className="min-h-screen w-full animate-in fade-in slide-in-from-bottom-8 bg-[#0A0A0A] pb-24 duration-700">
       <header className="sticky top-0 z-10 border-b border-[#2A2A2A] bg-[#0A0A0A]/80 px-6 pb-6 pt-6 backdrop-blur-xl">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <div className="h-1.5 w-1.5 rounded-full bg-[#8B5CF6]" aria-hidden />
-            <span className={SMALL_META_TEXT_CLASS}>
-              {workoutDate}
-            </span>
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="-ml-1 shrink-0 p-1 text-white transition-opacity hover:opacity-80"
+            aria-label={t('back')}
+          >
+            <ArrowLeft className="h-6 w-6" aria-hidden />
+          </button>
+          <div className="min-w-0 flex-1 flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#8B5CF6]" aria-hidden />
+              <span className={SMALL_META_TEXT_CLASS}>{workoutDate}</span>
+            </div>
+            <h1 className={OVERLAY_HEADER_TITLE_CLASS}>{toDisplayName(workoutName)}</h1>
           </div>
-          <h1 className={WORKOUT_TITLE_CLASS}>{toDisplayName(workoutName)}</h1>
         </div>
       </header>
 
       <div className="space-y-12 px-6 py-10">
-        <div className="grid grid-cols-2 gap-4">
-          {displayStats.map((stat) => (
-            <div
-              key={stat.label}
-              className="group relative overflow-hidden rounded-[24px] border border-[#222222] bg-[#111111] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#333333]"
-            >
-              <span className={`relative z-10 ${STAT_CARD_LABEL_CLASS}`}>
-                {stat.label}
-              </span>
-              <div className="relative z-10 mt-2">
-                <div className={`${STAT_NUMBER_CLASS} transition-colors group-hover:text-[#8B5CF6]`}>
-                  {stat.value}
-                </div>
-              </div>
+        {showStatsLoading ? (
+          <div className="flex justify-center py-12" aria-busy>
+            <Loader2 className="h-8 w-8 shrink-0 animate-spin text-[#8B5CF6]" aria-hidden />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            {displayStats.map((stat) => (
               <div
-                className="absolute -bottom-4 -right-4 h-16 w-16 rounded-full bg-white/[0.02] transition-transform duration-700 group-hover:scale-150"
-                aria-hidden
-              />
-            </div>
-          ))}
-        </div>
+                key={stat.label}
+                className="group relative overflow-hidden rounded-[24px] border border-[#222222] bg-[#111111] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#333333]"
+              >
+                <span className={`relative z-10 ${STAT_CARD_LABEL_CLASS}`}>{stat.label}</span>
+                <div className="relative z-10 mt-2">
+                  <div className={`${STAT_NUMBER_CLASS} transition-colors group-hover:text-[#8B5CF6]`}>
+                    {stat.value}
+                  </div>
+                </div>
+                <div
+                  className="pointer-events-none absolute -bottom-4 -right-4 h-16 w-16 rounded-full bg-white/[0.02] transition-transform duration-700 group-hover:scale-150"
+                  aria-hidden
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
         {prRecordsForDisplay.length > 0 ? (
           <section className="relative overflow-hidden rounded-[32px] border border-[#F59E0B]/20 bg-gradient-to-br from-[#F59E0B]/10 to-transparent p-8 shadow-[0_0_40px_-12px_rgba(245,158,11,0.2)]">
@@ -306,10 +303,7 @@ export default function ReviewScreen({
             </div>
             <div className="divide-y divide-[#F59E0B]/15">
               {prRecordsForDisplay.map((r) => (
-                <div
-                  key={r.id ?? `${r.exerciseId}-${r.achievedAt}`}
-                  className="py-3 first:pt-0 last:pb-0"
-                >
+                <div key={r.id ?? `${r.exerciseId}-${r.achievedAt}`} className="py-3 first:pt-0 last:pb-0">
                   <p className={EXERCISE_NAME_CLASS}>{prDisplayName(r, t('exercise'))}</p>
                   <p className={`mt-1 ${PR_VALUE_CLASS}`}>{prWeightSubtitle(r, t('kgUnit'), t('reps').toLowerCase())}</p>
                 </div>
@@ -328,9 +322,7 @@ export default function ReviewScreen({
             </div>
             <div>
               <h3 className="text-2xl font-black uppercase tracking-tight text-white">{t('coachAnalysis')}</h3>
-              <p className="text-[10px] uppercase tracking-widest text-[#6B7280]">
-                {t('postSessionIntelligence')}
-              </p>
+              <p className="text-[10px] uppercase tracking-widest text-[#6B7280]">{t('postSessionIntelligence')}</p>
             </div>
           </div>
 
@@ -344,9 +336,7 @@ export default function ReviewScreen({
             <p className={`px-2 ${BODY_TEXT_CLASS}`}>{t('noAiReview')}</p>
           ) : coachReview ? (
             <div className="space-y-10 px-2">
-              <p className={BODY_TEXT_CLASS}>
-                {extractReviewIntro(coachReview.intro)}
-              </p>
+              <p className={BODY_TEXT_CLASS}>{extractReviewIntro(coachReview.intro)}</p>
 
               <div className="grid grid-cols-1 gap-12">
                 <div className="space-y-4">
@@ -357,9 +347,7 @@ export default function ReviewScreen({
                   <div className="space-y-3">
                     {coachReview.wentWell.map((p, i) => (
                       <div key={`${p}-${i}`} className="group flex gap-4">
-                        <span className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
-                          {String(i + 1).padStart(2, '0')}
-                        </span>
+                        <span className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>{String(i + 1).padStart(2, '0')}</span>
                         <p className={BODY_TEXT_CLASS}>{p}</p>
                       </div>
                     ))}
@@ -374,9 +362,7 @@ export default function ReviewScreen({
                   <div className="space-y-3">
                     {coachReview.toImprove.map((p, i) => (
                       <div key={`${p}-${i}`} className="group flex gap-4">
-                        <span className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
-                          {String(i + 1).padStart(2, '0')}
-                        </span>
+                        <span className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>{String(i + 1).padStart(2, '0')}</span>
                         <p className={BODY_TEXT_CLASS}>{p}</p>
                       </div>
                     ))}
@@ -393,9 +379,7 @@ export default function ReviewScreen({
                   <div className="space-y-3">
                     {coachReview.exerciseNotes.map((block, i) => (
                       <div key={`${block.exerciseId}-${block.exerciseName}-${i}`} className="group flex gap-4">
-                        <span className={`mt-1 ${NOTE_INDEX_CLASS}`}>
-                          {String(i + 1).padStart(2, '0')}
-                        </span>
+                        <span className={`mt-1 ${NOTE_INDEX_CLASS}`}>{String(i + 1).padStart(2, '0')}</span>
                         <div className="min-w-0 flex-1">
                           <p className={EXERCISE_NAME_CLASS}>{toDisplayName(block.exerciseName || t('exercise'))}</p>
                           <p className={`mt-1 ${BODY_TEXT_CLASS}`}>{block.note}</p>
@@ -412,74 +396,76 @@ export default function ReviewScreen({
         </section>
 
         <section className="space-y-6">
-          <h3 className={`px-2 text-center ${SECTION_HEADER_CLASS}`}>
-            {t('exerciseLog')}
-          </h3>
-          <div className="space-y-4">
-            {logExercises.map((ex) => {
-              const completed = ex.sets.filter((s) => s.completed);
-              const volDisp = formatVolumeDisplay(exerciseVolumeKg(ex.sets), locale, t('kgUnit'));
-              const open = expandedLogKeys.includes(ex.key);
-              return (
-                <div key={ex.key} className="overflow-hidden rounded-[32px] border border-[#222222] bg-[#111111]">
-                  <button
-                    type="button"
-                    onClick={() => toggleLogExpand(ex.key)}
-                    className="group flex w-full items-center justify-between p-6 text-left transition-colors hover:bg-[#181818]"
-                  >
-                    <div>
-                      <div className={`${EXERCISE_NAME_CLASS} transition-colors group-hover:text-[#8B5CF6]`}>
-                        {toDisplayName(ex.name)}
-                      </div>
-                      <div className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
-                        {completed.length} {t('setsUnit')} • {volDisp}
-                      </div>
-                    </div>
-                    <div className="rounded-full bg-[#222222] p-2 transition-all group-hover:bg-[#8B5CF6]/20 group-hover:text-[#8B5CF6]">
-                      {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    </div>
-                  </button>
-                  <AnimatePresence>
-                    {open ? (
-                      <motion.div
-                        key={ex.key}
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="space-y-4 border-t border-white/5 px-6 pb-6 pt-4">
-                          <div className={`mb-2 grid grid-cols-3 gap-2 px-2 ${STAT_CARD_LABEL_CLASS}`}>
-                            <span>{t('set')}</span>
-                            <span className="text-center">{t('weight')}</span>
-                            <span className="text-right">{t('reps')}</span>
-                          </div>
-                          {completed.map((s, idx) => (
-                            <div key={s.n} className="grid grid-cols-3 items-center gap-2 px-2">
-                              <span className={SMALL_META_TEXT_CLASS}>
-                                {t('set')} {idx + 1}
-                              </span>
-                              <div className="text-center">
-                                <span className="text-base font-bold tabular-nums text-white">
-                                  {s.w}
-                                </span>
-                                <span className={`ml-1 ${SMALL_META_TEXT_CLASS}`}>{t('kgUnit')}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-base font-bold tabular-nums text-white">
-                                  {s.r}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
+          <h3 className={`px-2 text-center ${SECTION_HEADER_CLASS}`}>{t('exerciseLog')}</h3>
+          {showStatsLoading ? (
+            <div className="flex justify-center py-12" aria-busy>
+              <Loader2 className="h-8 w-8 shrink-0 animate-spin text-[#8B5CF6]" aria-hidden />
+            </div>
+          ) : logExercises.length > 0 ? (
+            <div className="space-y-4">
+              {logExercises.map((ex) => {
+                const completed = ex.sets.filter((s) => s.completed);
+                const volDisp = formatVolumeDisplay(exerciseVolumeKg(ex.sets), locale, t('kgUnit'));
+                const open = expandedLogKeys.includes(ex.key);
+                return (
+                  <div key={ex.key} className="overflow-hidden rounded-[32px] border border-[#222222] bg-[#111111]">
+                    <button
+                      type="button"
+                      onClick={() => toggleLogExpand(ex.key)}
+                      className="group flex w-full items-center justify-between p-6 text-left transition-colors hover:bg-[#181818]"
+                    >
+                      <div>
+                        <div className={`${EXERCISE_NAME_CLASS} transition-colors group-hover:text-[#8B5CF6]`}>
+                          {toDisplayName(ex.name)}
                         </div>
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </div>
+                        <div className={`mt-1 ${SMALL_META_TEXT_CLASS}`}>
+                          {completed.length} {t('setsUnit')} • {volDisp}
+                        </div>
+                      </div>
+                      <div className="rounded-full bg-[#222222] p-2 transition-all group-hover:bg-[#8B5CF6]/20 group-hover:text-[#8B5CF6]">
+                        {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </div>
+                    </button>
+                    <AnimatePresence>
+                      {open ? (
+                        <motion.div
+                          key={ex.key}
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="space-y-4 border-t border-white/5 px-6 pb-6 pt-4">
+                            <div className={`mb-2 grid grid-cols-3 gap-2 px-2 ${STAT_CARD_LABEL_CLASS}`}>
+                              <span>{t('set')}</span>
+                              <span className="text-center">{t('weight')}</span>
+                              <span className="text-right">{t('reps')}</span>
+                            </div>
+                            {completed.map((s, idx) => (
+                              <div key={s.n} className="grid grid-cols-3 items-center gap-2 px-2">
+                                <span className={SMALL_META_TEXT_CLASS}>{idx + 1}</span>
+                                <div className="text-center">
+                                  <span className="text-base font-bold tabular-nums text-white">{s.w}</span>
+                                  <span className={`ml-1 ${SMALL_META_TEXT_CLASS}`}>{t('kgUnit')}</span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-base font-bold tabular-nums text-white">{s.r}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className={`px-2 text-center text-sm ${BODY_TEXT_CLASS}`}>
+              {sessionId ? t('workoutNotFound') : t('noExercisesYet')}
+            </p>
+          )}
         </section>
       </div>
       <footer className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-[390px] border-t border-[#2A2A2A] bg-[#141414] p-4">
@@ -490,7 +476,7 @@ export default function ReviewScreen({
               onClick={onEditWorkout}
               className="flex-1 rounded-2xl border border-[#2A2A2A] bg-transparent py-5 text-sm font-bold text-white"
             >
-              {lang === 'ru' ? 'Редактировать' : 'Edit Session'}
+              {t('editWorkout')}
             </button>
           ) : null}
           <button
@@ -498,7 +484,7 @@ export default function ReviewScreen({
             onClick={onBack}
             className="flex-1 rounded-2xl bg-white py-5 text-sm font-bold text-black"
           >
-            {t('save')}
+            {t('done')}
           </button>
         </div>
       </footer>

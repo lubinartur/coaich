@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Calendar, ChevronRight, Trash2 } from 'lucide-react';
+import { Calendar, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui';
 import { useTranslation } from '@/hooks/useTranslation';
+import { translations, type TranslationLanguage } from '@/i18n/translations';
 import { db } from '@/services/db';
 import type { WorkoutSession } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
@@ -77,7 +78,9 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
   }, [refreshKey]);
 
   const deleteSession = async (sessionId: string) => {
-    if (!window.confirm('Удалить тренировку?')) return;
+    const profile = await db.profile.get(1);
+    const lang: TranslationLanguage = profile?.language === 'ru' ? 'ru' : 'en';
+    if (!window.confirm(translations[lang].deleteWorkoutConfirm)) return;
 
     await db.aiReviews.where('sessionId').equals(sessionId).delete();
     await db.workoutSessions.delete(sessionId);
@@ -86,9 +89,9 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+      <div className="flex flex-col gap-6 px-5 pb-24 pt-8">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">{t('history')}</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('history')}</h1>
         </header>
         <p className="text-sm text-text-secondary">{t('loading')}</p>
       </div>
@@ -97,9 +100,9 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
 
   if (sessions.length === 0) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+      <div className="flex flex-col gap-6 px-5 pb-24 pt-8">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">{t('history')}</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('history')}</h1>
         </header>
         <Card className="border-border py-10 text-center">
           <p className="text-sm text-text-secondary">{t('noWorkoutsYet')}</p>
@@ -109,9 +112,9 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
   }
 
   return (
-    <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+    <div className="flex flex-col gap-6 px-5 pb-24 pt-8">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">{t('history')}</h1>
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('history')}</h1>
       </header>
 
       <div className="flex flex-col gap-3">
@@ -171,7 +174,7 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
                 <div className="flex shrink-0 items-center gap-3">
                   <button
                     type="button"
-                    className="rounded-md p-1 text-red-500 transition-opacity hover:opacity-80"
+                    className="rounded-md p-2.5 text-red-500 transition-opacity hover:opacity-80"
                     aria-label={`${t('remove')} ${toDisplayName(w.workoutName)}`}
                     onClick={(e) => {
                       e.preventDefault();
@@ -184,7 +187,6 @@ export default function HistoryScreen({ onSelectWorkout, refreshKey = 0 }: Histo
                   >
                     <Trash2 className="text-red-500 w-5 h-5" aria-hidden />
                   </button>
-                  <ChevronRight className="mt-0.5 h-5 w-5 shrink-0 text-[#6B7280]" aria-hidden />
                 </div>
               </div>
             </div>
