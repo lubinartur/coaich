@@ -59,6 +59,12 @@ export async function seedExercisesIfEmpty(): Promise<void> {
   const n = await db.exercises.count();
   if (n === 0) {
     await db.exercises.bulkPut(EXERCISE_SEED);
+    return;
+  }
+  const existingIds = new Set(await db.exercises.toCollection().primaryKeys());
+  const missing = EXERCISE_SEED.filter((ex) => !existingIds.has(ex.id));
+  if (missing.length > 0) {
+    await db.exercises.bulkPut(missing);
   }
 }
 

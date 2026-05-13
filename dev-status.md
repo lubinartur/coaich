@@ -8,7 +8,7 @@ Originally exported from `coaich-memory` for project `coaich`, then manually ref
 - Manual refresh date: 2026-05-13
 - Project: `coaich`
 - Base memory entries: 6
-- Current branch state: V1 complete and deployed to Vercel from `v1-redesign` (Production)
+- Current branch state: V2 in progress, deployed to Vercel from `v1-redesign` (Production)
 
 ## Current Snapshot
 
@@ -74,8 +74,17 @@ Earlier in this cycle (2026-05-12):
 
 - Dumbbell weights are not auto-doubled in volume math; users enter the total they intend to lift.
 - No cloud sync and no authentication; all data remains in browser-local Dexie/IndexedDB.
-- `Progress` does not surface negative deltas — regressions on benchmark lifts are silently hidden.
 - A nested `coaich/` subfolder exists in the repo root as a leftover nested clone artifact; it is harmless and not deployed.
+
+## V2 Changes
+
+- Negative deltas in Progress — regression badges now visible on benchmark lifts (red `TrendingDown` pill when `changeTone === 'danger'`).
+- Drag-to-reorder in Logger — implemented via `@dnd-kit/core`, `@dnd-kit/sortable`. Exercise list is now sortable with a `GripVertical` drag handle. Extracted into `SortableExercise.tsx`, shared types in `Logger/shared.ts`.
+- Adaptive AI Coach with memory — full loop implemented:
+  - New Dexie table `coachMemory` (version 4) with `CoachMemoryEntry` type in `db.ts`.
+  - `generateCoachInsights()` in `aiService.ts` — fires after every Review, stores `summary` + `keyFindings` (max 10 entries, pruned automatically).
+  - `coachService.ts` — `generateCoachMessage` now loads last 4 memory entries and includes `keyFindings` in the Coach prompt.
+  - Wired in `Rating/index.tsx` as fire-and-forget after `db.aiReviews.add()`.
 
 ## Architecture
 
