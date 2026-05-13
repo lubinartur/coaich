@@ -27,7 +27,14 @@ export type DeloadCheckResult = {
   deloadNeeded: boolean;
   reason: string;
   consecutiveWeeks: number;
-  /** True when deload was triggered by consecutive-week threshold (natural ≥4 or on-cycle ≥6). */
+  /**
+   * True when deload was triggered by the consecutive-week threshold. The threshold itself
+   * depends on pharmacology and recent training frequency:
+   *  - natural, ≥3 sessions/week (avg over last 4 weeks): 4 weeks
+   *  - natural, <3 sessions/week:                          8 weeks
+   *  - on_cycle, ≥3 sessions/week:                         6 weeks
+   *  - on_cycle, <3 sessions/week:                        10 weeks
+   */
   weekThresholdHit: boolean;
 };
 
@@ -408,26 +415,49 @@ function sessionInWeek(s: WorkoutSession, weekStart: Date): boolean {
 }
 
 /**
- * Deload signals from recent history (last 6 weeks in Dexie + last 3 sessions for ratings).
+ * Deload signals from recent history.
+ *
+ * Pulls sessions from the last `LOOKBACK_WEEKS` (10) so we can detect both:
+ *  - consecutive-week streaks up to the largest possible threshold (10 weeks, on-cycle low-frequency)
+ *  - the rolling 4-week frequency average used to choose the threshold
+ *
+ * Frequency adjustment: if avg sessions/week over the last 4 weeks is `< 3`, the
+ * consecutive-week threshold is raised (natural 4 → 8, on_cycle 6 → 10) so people training
+ * 1–2x/week aren't pushed into an unneeded deload.
  */
 export async function checkDeloadNeeded(profile: Profile, now: Date = new Date()): Promise<DeloadCheckResult> {
-  const sixWeeksStart = new Date(now);
-  sixWeeksStart.setDate(sixWeeksStart.getDate() - 42);
-  sixWeeksStart.setHours(0, 0, 0, 0);
+  const LOOKBACK_WEEKS = 10;
+  const lookbackStart = new Date(now);
+  lookbackStart.setDate(lookbackStart.getDate() - 7 * LOOKBACK_WEEKS);
+  lookbackStart.setHours(0, 0, 0, 0);
   const windowSessions = await db.workoutSessions
     .where('finishedAt')
-    .aboveOrEqual(sixWeeksStart.toISOString())
+    .aboveOrEqual(lookbackStart.toISOString())
     .toArray();
+
+  const fourWeeksStart = new Date(now);
+  fourWeeksStart.setDate(fourWeeksStart.getDate() - 28);
+  fourWeeksStart.setHours(0, 0, 0, 0);
+  const nowIso = now.toISOString();
+  const fourWeeksStartIso = fourWeeksStart.toISOString();
+  const recent4WeekSessionCount = windowSessions.filter(
+    (s) => s.finishedAt >= fourWeeksStartIso && s.finishedAt <= nowIso,
+  ).length;
+  const avgSessionsPerWeek = recent4WeekSessionCount / 4;
+  const lowFrequency = avgSessionsPerWeek < 3;
+
+  const baseThreshold = profile.pharmacology === 'on_cycle' ? 6 : 4;
+  const lowFreqThreshold = profile.pharmacology === 'on_cycle' ? 10 : 8;
+  const weekThreshold = lowFrequency ? lowFreqThreshold : baseThreshold;
 
   let consecutiveWeeks = 0;
   let weekRule = false;
-  const weekThreshold = profile.pharmacology === 'on_cycle' ? 6 : 4;
 
   if (windowSessions.length > 0) {
     const sorted = [...windowSessions].sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
     const anchorMonday = startOfWeekMonday(new Date(sorted[0].finishedAt));
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < LOOKBACK_WEEKS; i++) {
       const ws = new Date(anchorMonday);
       ws.setDate(ws.getDate() - 7 * i);
       const has = windowSessions.some((s) => sessionInWeek(s, ws));
