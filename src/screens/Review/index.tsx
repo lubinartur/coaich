@@ -8,14 +8,16 @@ import {
   ChevronUp,
   Loader2,
   MessageSquare,
+  RefreshCw,
   Sparkles,
   Trophy,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n/translations';
-import { db } from '@/services/db';
-import { canonicalExerciseId } from '@/services/progressionEngine';
-import type { AIReview, PrRecord, WorkoutSession } from '@/types';
+import { db, getProfile } from '@/services/db';
+import { generateWorkoutReview, generateCoachInsights } from '@/services/aiService';
+import { canonicalExerciseId as canonicalId, previewExerciseTarget } from '@/services/progressionEngine';
+import type { AIReview, ExerciseRating, NextTarget, PrRecord, WorkoutSession } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
 
 export interface ReviewScreenProps {
@@ -127,6 +129,7 @@ export default function ReviewScreen({
   const [prRecords, setPrRecords] = useState<PrRecord[]>([]);
   const [coachReview, setCoachReview] = useState<AIReview | null>(null);
   const [coachLoading, setCoachLoading] = useState(() => Boolean(sessionId));
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -195,7 +198,7 @@ export default function ReviewScreen({
       if (!name && session) {
         const cid = r.exerciseId;
         const ex = session.exercises.find(
-          (e) => e.exerciseId === cid || canonicalExerciseId(e.exerciseId) === cid,
+          (e) => e.exerciseId === cid || canonicalId(e.exerciseId) === cid,
         );
         name = (ex?.exerciseName ?? '').trim();
       }
@@ -242,6 +245,35 @@ export default function ReviewScreen({
 
   const toggleLogExpand = (key: string) => {
     setExpandedLogKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  };
+
+  const handleRegenerate = async () => {
+    if (!sessionId || !session || regenerating) return;
+    setRegenerating(true);
+    try {
+      const profile = await getProfile();
+      if (!profile) return;
+      const ratings: ExerciseRating[] = session.ratings ?? [];
+      const nextTargets: NextTarget[] = [];
+      for (const ex of session.exercises) {
+        const id = canonicalId(ex.exerciseId);
+        const preview = await previewExerciseTarget(id, ex.exerciseName, profile.goal, profile.pharmacology);
+        if (!preview) continue;
+        nextTargets.push({ exerciseId: id, exerciseName: ex.exerciseName, weight: preview.weight, reps: preview.reps, sets: preview.sets });
+      }
+      const review = await generateWorkoutReview({ profile, session, ratings, nextTargets });
+      const id = crypto.randomUUID();
+      const generatedAt = new Date().toISOString();
+      await db.aiReviews.where('sessionId').equals(sessionId).delete();
+      await db.aiReviews.add({ ...review, id, sessionId, generatedAt });
+      setCoachReview({ ...review, id, sessionId, generatedAt });
+      const recentSessions = await db.workoutSessions.orderBy('finishedAt').reverse().limit(5).toArray();
+      void generateCoachInsights(sessionId, session, review, recentSessions);
+    } catch (err) {
+      console.error('handleRegenerate', err);
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   return (
@@ -316,14 +348,28 @@ export default function ReviewScreen({
         ) : null}
 
         <section className="space-y-8">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-xs font-black text-black shadow-xl shadow-white/10">
-              AI
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-xs font-black text-black shadow-xl shadow-white/10">
+                AI
+              </div>
+              <div>
+                <h3 className="text-2xl font-black uppercase tracking-tight text-white">{t('coachAnalysis')}</h3>
+                <p className="text-[10px] uppercase tracking-widest text-[#6B7280]">{t('postSessionIntelligence')}</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-2xl font-black uppercase tracking-tight text-white">{t('coachAnalysis')}</h3>
-              <p className="text-[10px] uppercase tracking-widest text-[#6B7280]">{t('postSessionIntelligence')}</p>
-            </div>
+            {sessionId && coachReview ? (
+              <button
+                type="button"
+                onClick={() => void handleRegenerate()}
+                disabled={regenerating}
+                className="flex items-center gap-1.5 rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] px-3 py-2 text-xs font-bold text-[#6B7280] transition-all hover:border-[#8B5CF6]/40 hover:text-[#8B5CF6] disabled:opacity-40"
+                aria-label="Regenerate AI review"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${regenerating ? 'animate-spin' : ''}`} aria-hidden />
+                {regenerating ? '...' : 'AI'}
+              </button>
+            ) : null}
           </div>
 
           {sessionId && coachLoading ? (
