@@ -85,6 +85,7 @@ Earlier in this cycle (2026-05-12):
   - `generateCoachInsights()` in `aiService.ts` — fires after every Review, stores `summary` + `keyFindings` (max 10 entries, pruned automatically).
   - `coachService.ts` — `generateCoachMessage` now loads last 4 memory entries and includes `keyFindings` in the Coach prompt.
   - Wired in `Rating/index.tsx` as fire-and-forget after `db.aiReviews.add()`.
+- Regenerate AI Review — a refresh button on the Review screen allows re-running the AI analysis for any past session. Replaces the existing `aiReviews` entry in Dexie and fires `generateCoachInsights` in the background.
 
 ## Architecture
 

@@ -273,6 +273,17 @@ function formatRestMmSs(totalSec: number): string {
   return `${m}:${r.toString().padStart(2, '0')}`;
 }
 
+function findNextIncompleteExIdx(list: LoggerExercise[], completedIdx: number): number | null {
+  const incomplete = (ex: LoggerExercise) => !(ex.sets.length > 0 && ex.sets.every((s) => s.completed));
+  for (let j = completedIdx + 1; j < list.length; j++) {
+    if (incomplete(list[j])) return j;
+  }
+  for (let j = 0; j < completedIdx; j++) {
+    if (incomplete(list[j])) return j;
+  }
+  return null;
+}
+
 export interface LoggerScreenProps {
   workoutName: string;
   workoutType: string;
@@ -303,6 +314,8 @@ export default function LoggerScreen({
   const [swapExIdx, setSwapExIdx] = useState<number | null>(null);
   const [pickerInitialFilter, setPickerInitialFilter] = useState<ExercisePickerFilter | undefined>(undefined);
   const [removeConfirm, setRemoveConfirm] = useState<{ exIdx: number; name: string } | null>(null);
+  /** Single expanded exercise accordion; `0` = first exercise open by default. */
+  const [expandedExIdx, setExpandedExIdx] = useState<number | null>(0);
   const templateKey = exerciseTemplate.map((e) => e.exerciseId).join('|');
   const templateLoadGenRef = useRef(0);
   const [restDurationSec, setRestDurationSec] = useState(90);
@@ -369,12 +382,15 @@ export default function LoggerScreen({
   useEffect(() => {
     const gen = ++templateLoadGenRef.current;
     let cancelled = false;
-    setExercises(skeletonFromTemplate(exerciseTemplate));
+    const sk = skeletonFromTemplate(exerciseTemplate);
+    setExercises(sk);
+    setExpandedExIdx(sk.length > 0 ? 0 : null);
     const template = exerciseTemplate;
     void (async () => {
       const built = await buildLoggerExercisesFromTemplate(template);
       if (cancelled || gen !== templateLoadGenRef.current) return;
       setExercises(built);
+      setExpandedExIdx(built.length > 0 ? 0 : null);
     })();
     return () => {
       cancelled = true;
@@ -461,6 +477,14 @@ export default function LoggerScreen({
         const row = next[exIdx].sets[setIdx];
         row.completed = willComplete;
         row.isPR = false;
+        if (willComplete) {
+          const ex = next[exIdx];
+          const allDone = ex.sets.length > 0 && ex.sets.every((s) => s.completed);
+          if (allDone) {
+            const nextIdx = findNextIncompleteExIdx(next, exIdx);
+            queueMicrotask(() => setExpandedExIdx(nextIdx));
+          }
+        }
         return next;
       });
       if (willComplete) {
@@ -495,6 +519,14 @@ export default function LoggerScreen({
     if (!removeConfirm) return;
     const { exIdx } = removeConfirm;
     setRemoveConfirm(null);
+    const nextLen = exercises.length - 1;
+    setExpandedExIdx((exp) => {
+      if (nextLen <= 0) return null;
+      if (exp === null) return 0;
+      if (exp === exIdx) return Math.min(exIdx, nextLen - 1);
+      if (exp > exIdx) return exp - 1;
+      return exp;
+    });
     setExercises((prev) => prev.filter((_, i) => i !== exIdx));
   };
 
@@ -510,6 +542,18 @@ export default function LoggerScreen({
       const oldIndex = prev.findIndex((_, i) => `ex-${i}` === active.id);
       const newIndex = prev.findIndex((_, i) => `ex-${i}` === over.id);
       if (oldIndex === -1 || newIndex === -1) return prev;
+      queueMicrotask(() => {
+        setExpandedExIdx((exp) => {
+          if (exp === null) return null;
+          if (exp === oldIndex) return newIndex;
+          if (oldIndex < newIndex) {
+            if (exp > oldIndex && exp <= newIndex) return exp - 1;
+          } else if (oldIndex > newIndex) {
+            if (exp >= newIndex && exp < oldIndex) return exp + 1;
+          }
+          return exp;
+        });
+      });
       return arrayMove(prev, oldIndex, newIndex);
     });
   };
@@ -656,26 +700,26 @@ export default function LoggerScreen({
         </div>
       ) : null}
 
-      <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-[#2A2A2A] bg-[#0A0A0A]/95 px-6 py-4 backdrop-blur-md">
-        <div className="flex items-center gap-4">
+      <div className="sticky top-0 z-10 border-b border-[#2A2A2A] bg-[#0A0A0A] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.65)]">
+        <header className="flex shrink-0 items-center gap-4 px-6 py-4">
           <button
             type="button"
             onClick={tryClose}
-            className="-ml-1 p-1 text-white transition-opacity hover:opacity-80"
+            className="-ml-1 shrink-0 p-1 text-white transition-opacity hover:opacity-80"
             aria-label={t('closeWorkout')}
           >
             <ArrowLeft className="h-6 w-6" />
           </button>
           <div>
             <h1 className="text-lg font-bold text-white">{localizedWorkoutName}</h1>
-            <p className="font-mono text-sm font-medium tabular-nums text-[#8B5CF6]">
+            <p className="font-mono text-sm font-medium tabular-nums text-[#6B7280]">
               {formatElapsed(
                 workoutStartMs == null ? 0 : Math.max(0, Math.floor((Date.now() - workoutStartMs) / 1000)),
               )}
             </p>
           </div>
-        </div>
-      </header>
+        </header>
+      </div>
 
       <div className="min-h-0 flex-1 space-y-10 overflow-y-auto px-4 py-8 pb-40 no-scrollbar">
         {exercises.length === 0 ? (
@@ -691,6 +735,10 @@ export default function LoggerScreen({
                   sortableId={`ex-${exIdx}`}
                   ex={ex}
                   exIdx={exIdx}
+                  targetLine={ex.recommend.trim()}
+                  progressionStatus={ex.progressionStatus}
+                  expanded={expandedExIdx === exIdx}
+                  onAccordionToggle={() => setExpandedExIdx((p) => (p === exIdx ? null : exIdx))}
                   updateSet={updateSet}
                   toggleSetComplete={toggleSetComplete}
                   addSet={addSet}
@@ -719,20 +767,33 @@ export default function LoggerScreen({
             aria-label={`${t('rest')} ${formatRestMmSs(restRemaining)} ${t('remaining')}`}
           >
             <div
-              className={`flex items-center rounded-full border border-[#2A2A2A] bg-[#1C1C1C] px-6 py-3 shadow-2xl transition-all ${
+              className={`flex min-h-[64px] items-center rounded-2xl border px-6 py-4 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.55)] transition-all ${
                 restZeroFlash
-                  ? 'animate-pulse border-[#8B5CF6] bg-[#8B5CF6] text-white'
-                  : ''
+                  ? 'animate-pulse border-[#8B5CF6] bg-[#8B5CF6] text-white shadow-[#8B5CF6]/35'
+                  : 'border-[#8B5CF6]/25 bg-[#1C1C1C] shadow-black/40'
               }`}
             >
-              <span className="text-sm font-bold tabular-nums text-white">
-                {t('rest')} {formatRestMmSs(restRemaining)}
+              <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span
+                  className={`text-xs font-bold uppercase tracking-widest ${
+                    restZeroFlash ? 'text-white/85' : 'text-[#6B7280]'
+                  }`}
+                >
+                  {t('rest')}
+                </span>
+                <span
+                  className={`font-mono text-2xl font-black tabular-nums leading-none ${
+                    restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'
+                  }`}
+                >
+                  {formatRestMmSs(restRemaining)}
+                </span>
               </span>
-              <div className={`mx-4 h-4 w-px ${restZeroFlash ? 'bg-white/30' : 'bg-[#2A2A2A]'}`} aria-hidden />
+              <div className={`mx-5 h-8 w-px shrink-0 ${restZeroFlash ? 'bg-white/30' : 'bg-[#2A2A2A]'}`} aria-hidden />
               <button
                 type="button"
                 onClick={dismissRestTimer}
-                className={`text-sm font-bold ${restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'}`}
+                className={`shrink-0 text-base font-bold ${restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'}`}
               >
                 {t('skip')}
               </button>
