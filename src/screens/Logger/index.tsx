@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeft, ArrowRight, Plus } from 'lucide-react';
 import {
@@ -319,8 +319,12 @@ export default function LoggerScreen({
   const templateKey = exerciseTemplate.map((e) => e.exerciseId).join('|');
   const templateLoadGenRef = useRef(0);
   const [restDurationSec, setRestDurationSec] = useState(90);
-  const [restRemaining, setRestRemaining] = useState<number | null>(null);
+  /** Wall-clock end of rest period (ms); remaining is derived from Date.now(). */
+  const [restEndTime, setRestEndTime] = useState<number | null>(null);
+  /** Bumps once per second while rest is active so UI re-reads Date.now(). */
+  const [restTick, setRestTick] = useState(0);
   const [restZeroFlash, setRestZeroFlash] = useState(false);
+  const restCompleteHandledRef = useRef(false);
   const addExerciseFooterLabel = lang === 'ru' ? 'Упражнение' : 'Exercise';
   const startFooterLabel = lang === 'ru' ? 'Начать' : 'Start';
   const finishFooterLabel = lang === 'ru' ? 'Завершить' : 'Finish';
@@ -407,21 +411,41 @@ export default function LoggerScreen({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [workoutStartMs]);
 
+  const restRemaining = useMemo(() => {
+    if (restEndTime == null) return null;
+    void restTick;
+    return Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
+  }, [restEndTime, restTick]);
+
   useEffect(() => {
-    if (restRemaining === null) return undefined;
-    if (restRemaining <= 0) {
-      setRestZeroFlash(true);
-      const done = window.setTimeout(() => {
-        setRestZeroFlash(false);
-        setRestRemaining(null);
-      }, 650);
-      return () => window.clearTimeout(done);
+    if (restEndTime == null) {
+      restCompleteHandledRef.current = false;
+      return undefined;
     }
-    const id = window.setInterval(() => {
-      setRestRemaining((r) => (r === null || r <= 0 ? r : r - 1));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [restRemaining]);
+    const bump = () => setRestTick((n) => n + 1);
+    const id = window.setInterval(bump, 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [restEndTime]);
+
+  useEffect(() => {
+    if (restEndTime == null || restRemaining === null || restRemaining > 0) return undefined;
+    if (restCompleteHandledRef.current) return undefined;
+    restCompleteHandledRef.current = true;
+    setRestZeroFlash(true);
+    const done = window.setTimeout(() => {
+      setRestZeroFlash(false);
+      setRestEndTime(null);
+      restCompleteHandledRef.current = false;
+    }, 650);
+    return () => window.clearTimeout(done);
+  }, [restEndTime, restRemaining]);
 
   const formatElapsed = useCallback((total: number) => {
     const h = Math.floor(total / 3600);
@@ -437,13 +461,16 @@ export default function LoggerScreen({
   };
 
   const dismissRestTimer = useCallback(() => {
-    setRestRemaining(null);
+    setRestEndTime(null);
     setRestZeroFlash(false);
+    restCompleteHandledRef.current = false;
   }, []);
 
   const startRestTimer = useCallback(() => {
     setRestZeroFlash(false);
-    setRestRemaining(restDurationSec);
+    restCompleteHandledRef.current = false;
+    setRestEndTime(Date.now() + restDurationSec * 1000);
+    setRestTick((n) => n + 1);
   }, [restDurationSec]);
 
   const runPrCheck = useCallback(async (exIdx: number, setIdx: number) => {
@@ -755,7 +782,7 @@ export default function LoggerScreen({
       </div>
 
       <AnimatePresence>
-        {restRemaining !== null ? (
+        {restEndTime !== null || restZeroFlash ? (
           <motion.div
             key="rest-timer"
             initial={{ y: 18, opacity: 0 }}
@@ -764,7 +791,7 @@ export default function LoggerScreen({
             className="fixed bottom-[100px] left-1/2 z-40 -translate-x-1/2"
             role="status"
             aria-live="polite"
-            aria-label={`${t('rest')} ${formatRestMmSs(restRemaining)} ${t('remaining')}`}
+            aria-label={`${t('rest')} ${formatRestMmSs(restRemaining ?? 0)} ${t('remaining')}`}
           >
             <div
               className={`flex min-h-[64px] items-center rounded-2xl border px-6 py-4 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.55)] transition-all ${
@@ -786,7 +813,7 @@ export default function LoggerScreen({
                     restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'
                   }`}
                 >
-                  {formatRestMmSs(restRemaining)}
+                  {formatRestMmSs(restRemaining ?? 0)}
                 </span>
               </span>
               <div className={`mx-5 h-8 w-px shrink-0 ${restZeroFlash ? 'bg-white/30' : 'bg-[#2A2A2A]'}`} aria-hidden />
