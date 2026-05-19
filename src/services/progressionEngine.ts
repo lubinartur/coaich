@@ -568,8 +568,11 @@ function representativeWeight(ex: SessionExercise): number | null {
   const first = done[0].weight;
   const allSame = done.every((s) => s.weight === first);
   if (allSame) return roundWeightKg(first);
-  const sum = done.reduce((a, s) => a + s.weight, 0);
-  return roundWeightKg(sum / done.length);
+  const maxWeight = Math.max(...done.map((s) => s.weight));
+  const workingSets = done.filter((s) => s.weight >= maxWeight * 0.75);
+  if (workingSets.length === 0) return roundWeightKg(maxWeight);
+  const sum = workingSets.reduce((a, s) => a + s.weight, 0);
+  return roundWeightKg(sum / workingSets.length);
 }
 
 /**
