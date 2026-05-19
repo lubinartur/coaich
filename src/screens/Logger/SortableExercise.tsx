@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { ArrowLeftRight, Check, CheckCircle2, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Check, CheckCircle2, GripVertical, Minus, Plus, Trash2 } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getRecLastLayout, type ProgressionStatus } from '@/services/progressionEngine';
@@ -36,6 +36,7 @@ export interface SortableExerciseProps {
   ) => void;
   toggleSetComplete: (exIdx: number, setIdx: number) => void;
   addSet: (exIdx: number) => void;
+  removeSet: (exIdx: number, setIdx: number) => void;
   openPickerForSwap: (exIdx: number, muscleGroup: MuscleGroup) => void;
   setRemoveConfirm: (value: RemoveConfirmValue) => void;
   t: (key: TranslationKey) => string;
@@ -58,6 +59,7 @@ export default function SortableExercise({
   updateSet,
   toggleSetComplete,
   addSet,
+  removeSet,
   openPickerForSwap,
   setRemoveConfirm,
   t,
@@ -94,6 +96,14 @@ export default function SortableExercise({
   const partial = doneCount > 0 && !allDone;
 
   const collapsedDimmed = allDone && !expanded;
+  const canRemoveSet = ex.sets.length > 1;
+  const setRowGrid = isBw
+    ? canRemoveSet
+      ? 'grid-cols-[32px_minmax(0,1fr)_minmax(88px,max-content)]'
+      : 'grid-cols-[32px_minmax(0,1fr)_52px]'
+    : canRemoveSet
+      ? 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_minmax(88px,max-content)]'
+      : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]';
 
   const badgeOnlyRow = recommendBadge ? (
     <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -214,11 +224,7 @@ export default function SortableExercise({
 
             <div className="space-y-2 px-2 pb-2 pt-4 sm:px-4">
               <div
-                className={`grid items-end gap-3 px-1 pb-1 pt-0 text-[10px] font-black uppercase tracking-widest text-[#6B7280] sm:gap-4 ${
-                  isBw
-                    ? 'grid-cols-[32px_minmax(0,1fr)_52px]'
-                    : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]'
-                }`}
+                className={`grid items-end gap-3 px-1 pb-1 pt-0 text-[10px] font-black uppercase tracking-widest text-[#6B7280] sm:gap-4 ${setRowGrid}`}
               >
                 <span aria-hidden className="block min-h-[1em]" />
                 {!isBw ? (
@@ -242,11 +248,9 @@ export default function SortableExercise({
                   <motion.div
                     layout
                     key={set.id}
-                    className={`grid items-center gap-3 rounded-2xl px-1 py-3 transition-all sm:gap-4 ${
-                      isBw
-                        ? 'grid-cols-[32px_minmax(0,1fr)_52px]'
-                        : 'grid-cols-[32px_minmax(0,1fr)_16px_minmax(0,1fr)_52px]'
-                    } ${set.completed ? 'border border-[#22C55E]/10 bg-[#22C55E]/5' : 'bg-transparent'}`}
+                    className={`grid items-center gap-3 rounded-2xl px-1 py-3 transition-all sm:gap-4 ${setRowGrid} ${
+                      set.completed ? 'border border-[#22C55E]/10 bg-[#22C55E]/5' : 'bg-transparent'
+                    }`}
                   >
                     <div className="text-center">
                       <span className="block text-[10px] font-black text-[#6B7280]">{t('set')}</span>
@@ -282,7 +286,7 @@ export default function SortableExercise({
                         onFocus={(e) => e.currentTarget.select()}
                       />
                     </div>
-                    <div className="flex min-w-0 items-stretch justify-end">
+                    <div className="flex min-w-0 items-center justify-end gap-0.5">
                       <button
                         type="button"
                         aria-label={set.completed ? t('uncompleteSet') : t('completeSet')}
@@ -295,6 +299,15 @@ export default function SortableExercise({
                       >
                         <Check className="h-6 w-6" strokeWidth={4} />
                       </button>
+                      {canRemoveSet ? (
+                        <button
+                          type="button"
+                          onClick={() => removeSet(exIdx, setIdx)}
+                          className="p-2 text-red-500"
+                        >
+                          <Minus size={16} />
+                        </button>
+                      ) : null}
                     </div>
                   </motion.div>
                 ))}

@@ -599,6 +599,16 @@ export default function LoggerScreen({
     });
   };
 
+  const removeSet = (exIdx: number, setIdx: number) => {
+    setExercises((prev) => {
+      const ex = prev[exIdx];
+      if (!ex || ex.sets.length <= 1) return prev;
+      return prev.map((row, i) =>
+        i === exIdx ? { ...row, sets: row.sets.filter((_, j) => j !== setIdx) } : row,
+      );
+    });
+  };
+
   const appendExerciseFromLibrary = async (ex: Exercise) => {
     const row = await buildLoggerExerciseRow({
       exerciseId: ex.id,
@@ -769,6 +779,7 @@ export default function LoggerScreen({
                   updateSet={updateSet}
                   toggleSetComplete={toggleSetComplete}
                   addSet={addSet}
+                  removeSet={removeSet}
                   openPickerForSwap={openPickerForSwap}
                   setRemoveConfirm={setRemoveConfirm}
                   t={t}
