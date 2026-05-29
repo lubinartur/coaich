@@ -16,6 +16,27 @@ export interface CoachPromptData {
 
 export type RecommendedWorkoutType = 'push' | 'pull' | 'legs' | 'full_body';
 
+type SplitType = 'ppl' | 'upper_lower' | 'full_body';
+
+function getSplitType(profile: Profile): SplitType {
+  return profile.splitType ?? 'ppl';
+}
+
+/**
+ * Resolves the display name shown in Today/Logger headers for a recommended workout type,
+ * respecting the user's chosen split (PPL / Upper-Lower / Full Body) and language.
+ */
+function workoutNameForSplit(profile: Profile, type: RecommendedWorkoutType): string {
+  const split = getSplitType(profile);
+  const ru = profile.language === 'ru';
+  if (split === 'full_body') return 'Full Body';
+  if (split === 'upper_lower') {
+    if (type === 'legs') return ru ? 'Lower - Низ тела' : 'Lower - Lower Body';
+    return ru ? 'Upper - Верх тела' : 'Upper - Upper Body';
+  }
+  return WORKOUT_NAMES[type];
+}
+
 export interface WorkoutRecommendation {
   /** `null` = rest day (trained within recovery window). */
   workoutType: RecommendedWorkoutType | null;
@@ -325,11 +346,67 @@ async function recommendActiveWorkout(
   last: WorkoutSession | undefined,
   prev: WorkoutSession | undefined,
 ): Promise<{ workoutType: RecommendedWorkoutType; workoutName: string; reasoning: string }> {
+  const split = getSplitType(profile);
+  const hours = last ? hoursSince(last.finishedAt, now) : Number.POSITIVE_INFINITY;
+
+  if (split === 'full_body') {
+    let recoveryNote = '';
+    if (last && hours < 24) {
+      recoveryNote = `Only ${Math.max(1, Math.round(hours))}h since your last workout — recovery first.`;
+    } else if (last && hours >= 24 && hours <= 48) {
+      recoveryNote = 'Roughly a day of recovery — a normal training window.';
+    } else if (last && hours > 72) {
+      recoveryNote = "You've had a longer break — any workout is fine when you're ready.";
+    }
+    const reasoning = composeReasoning([
+      'Full-body split — every session hits the whole body.',
+      recoveryNote,
+      goalPhrase(profile),
+    ]);
+    return {
+      workoutType: 'full_body',
+      workoutName: workoutNameForSplit(profile, 'full_body'),
+      reasoning,
+    };
+  }
+
+  if (split === 'upper_lower') {
+    const lastLabel = last ? normalizeRotationKey(last.type) : null;
+    let workoutType: RecommendedWorkoutType;
+    let rotationExplain: string;
+    if (!lastLabel) {
+      workoutType = 'push';
+      rotationExplain = 'No completed sessions on file yet — starting from upper.';
+    } else if (lastLabel === 'legs') {
+      workoutType = 'push';
+      rotationExplain = 'Last session was lower — rotating to upper.';
+    } else if (lastLabel === 'push' || lastLabel === 'pull') {
+      workoutType = 'legs';
+      rotationExplain = 'Last session was upper — rotating to lower.';
+    } else {
+      workoutType = 'push';
+      rotationExplain = 'After a full-body session, alternating to upper for structure.';
+    }
+    let recoveryNote = '';
+    if (last && hours < 24) {
+      recoveryNote = `Only ${Math.max(1, Math.round(hours))}h since your last workout — keep loads light or rest if needed.`;
+    } else if (last && hours >= 24 && hours <= 48) {
+      recoveryNote = 'Roughly a day of recovery — a normal training window.';
+    } else if (last && hours > 72) {
+      recoveryNote = "You've had a longer break — either upper or lower is fine.";
+    }
+    const reasoning = composeReasoning([rotationExplain, recoveryNote, goalPhrase(profile)]);
+    return {
+      workoutType,
+      workoutName: workoutNameForSplit(profile, workoutType),
+      reasoning,
+    };
+  }
+
   const weekStartIso = startOfWeekMonday(now).toISOString();
   const weekSessions = await db.workoutSessions.where('finishedAt').aboveOrEqual(weekStartIso).toArray();
 
   let workoutType = rotationFromLastSession(last, prev);
-  const hours = last ? hoursSince(last.finishedAt, now) : Number.POSITIVE_INFINITY;
 
   const weekly = countWeeklySetsByFocus(weekSessions, now);
   const weeklyPick = weeklyPrioritySplit(weekly);
@@ -379,7 +456,7 @@ async function recommendActiveWorkout(
     }
   }
 
-  const workoutName = WORKOUT_NAMES[workoutType];
+  const workoutName = workoutNameForSplit(profile, workoutType);
   const reasoning = composeReasoning([rotationExplain, recoveryNote, weeklyNote, goalPhrase(profile)]);
 
   return { workoutType, workoutName, reasoning };

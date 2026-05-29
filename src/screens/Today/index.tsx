@@ -402,17 +402,20 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
 
   const isRestRecommended = reco !== null && reco.workoutType === null;
 
-  /** Short card title from recommendation (e.g. "Pull" from "Pull - Back & Biceps"), never goal labels. */
-  const workoutCardTitle =
-    displayWorkoutType != null
-      ? getProgramLabel(displayWorkoutType)
-      : displayWorkoutName.length > 0
-      ? (() => {
-          const i = displayWorkoutName.indexOf(' - ');
-          const raw = i === -1 ? displayWorkoutName : displayWorkoutName.slice(0, i);
-          return toDisplayName(raw);
-        })()
-      : '';
+  /**
+   * Short card title from the recommendation (e.g. "Pull" from "Pull - Back & Biceps",
+   * "Upper" from "Upper - Upper Body", "Full Body" from "Full Body").
+   * Falls back to the localized program label when no name is set yet.
+   */
+  const workoutCardTitle = (() => {
+    if (displayWorkoutName.length > 0) {
+      const i = displayWorkoutName.indexOf(' - ');
+      const raw = i === -1 ? displayWorkoutName : displayWorkoutName.slice(0, i);
+      return toDisplayName(raw);
+    }
+    if (displayWorkoutType != null) return getProgramLabel(displayWorkoutType);
+    return '';
+  })();
 
   return (
     <motion.div
@@ -609,11 +612,9 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
               onClick={() => {
                 if (!reco || displayWorkoutType === null) return;
                 const workoutName =
-                  displayWorkoutType != null
-                    ? getWorkoutNameForProgram(displayWorkoutType)
-                    : reco.workoutType !== null
-                      ? reco.workoutName
-                      : reco.trainAnywayName ?? reco.workoutName;
+                  displayWorkoutName.length > 0
+                    ? displayWorkoutName
+                    : getWorkoutNameForProgram(displayWorkoutType);
                 onStartWorkout?.({
                   workoutName,
                   workoutType: displayWorkoutType,

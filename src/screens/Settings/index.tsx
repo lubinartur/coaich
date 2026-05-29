@@ -80,7 +80,23 @@ type SheetId =
   | 'gender'
   | 'age'
   | 'weight'
-  | 'height';
+  | 'height'
+  | 'splitType';
+
+const SPLIT_OPTIONS = ['ppl', 'upper_lower', 'full_body'] as const satisfies
+  readonly NonNullable<Profile['splitType']>[];
+
+function formatSplitType(
+  split: NonNullable<Profile['splitType']>,
+  t: (key: TranslationKey) => string,
+): string {
+  const m: Record<NonNullable<Profile['splitType']>, TranslationKey> = {
+    ppl: 'splitPPL',
+    upper_lower: 'splitUpperLower',
+    full_body: 'splitFullBody',
+  };
+  return t(m[split]);
+}
 
 function sheetTitle(id: NonNullable<SheetId>, t: (key: TranslationKey) => string): string {
   const titles: Record<NonNullable<SheetId>, TranslationKey> = {
@@ -94,6 +110,7 @@ function sheetTitle(id: NonNullable<SheetId>, t: (key: TranslationKey) => string
     age: 'age',
     weight: 'weightKg',
     height: 'heightCm',
+    splitType: 'splitType',
   };
   return t(titles[id]);
 }
@@ -228,6 +245,12 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
 
   const applyGender = async (gender: Profile['gender']) => {
     await db.profile.update(1, { gender });
+    await reloadProfile();
+    closeSheet();
+  };
+
+  const applySplitType = async (splitType: NonNullable<Profile['splitType']>) => {
+    await db.profile.update(1, { splitType });
     await reloadProfile();
     closeSheet();
   };
@@ -456,6 +479,18 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
                 </>
               )}
 
+              {sheet === 'splitType' &&
+                SPLIT_OPTIONS.map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    className={optionBtn((profile.splitType ?? 'ppl') === o)}
+                    onClick={() => void applySplitType(o)}
+                  >
+                    {formatSplitType(o, t)}
+                  </button>
+                ))}
+
               {sheet === 'gender' && (
                 <>
                   <button
@@ -511,6 +546,19 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
           >
             <span className="text-sm text-white">{t('language')}</span>
             <span className="text-sm font-bold text-[#8B5CF6]">{langLabel}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('splitType')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('splitType')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">
+                {formatSplitType(profile.splitType ?? 'ppl', t)}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
           </button>
           <div className="flex w-full items-center justify-between p-4">
             <span className="text-sm text-white">{t('units')}</span>
