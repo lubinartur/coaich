@@ -70,15 +70,19 @@ export async function seedExercisesIfEmpty(): Promise<void> {
 }
 
 /**
- * Seed multi-day preset programs (`PRESET_PROGRAMS`) on first launch.
+ * Seed multi-day preset programs (`PRESET_PROGRAMS`) on first launch, and back-fill new
+ * presets for existing users via a count-based migration.
  *
- * Idempotent: only inserts on an empty table so user-edited programs are not overwritten.
- * For users who already have programs, missing presets are *not* back-filled (their library
- * is their own); add an explicit migration if that becomes desirable.
+ * - Empty table → `bulkPut` all presets (initial seed).
+ * - Has fewer presets than `PRESET_PROGRAMS.length` (e.g. an older client only saw
+ *   "Upper/Lower") → `bulkPut` all presets. `bulkPut` replaces by primary key, so any
+ *   existing preset is overwritten with the canonical definition while missing ones
+ *   are inserted. User-authored programs (whose ids don't collide with preset ids)
+ *   are left untouched.
  */
 export async function seedProgramsIfEmpty(): Promise<void> {
   const n = await db.programs.count();
-  if (n === 0) {
+  if (n === 0 || n < PRESET_PROGRAMS.length) {
     await db.programs.bulkPut([...PRESET_PROGRAMS]);
   }
 }

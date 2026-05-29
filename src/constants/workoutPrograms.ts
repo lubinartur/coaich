@@ -72,6 +72,68 @@ export type WorkoutProgramTemplateKey = keyof typeof WORKOUT_PROGRAM_TEMPLATES;
 /** Multi-day preset programs (keep exercise ids in sync with `EXERCISE_SEED`). */
 export const PRESET_PROGRAMS: readonly Program[] = [
   {
+    id: 'ppl-standard',
+    name: 'PPL',
+    type: 'template',
+    days: [
+      {
+        dayName: 'Push',
+        type: 'push',
+        exercises: [
+          'barbell-bench-press',
+          'incline-dumbbell-press',
+          'overhead-press',
+          'lateral-raise',
+          'tricep-pushdown',
+          'rope-tricep-extension',
+        ],
+      },
+      {
+        dayName: 'Pull',
+        type: 'pull',
+        exercises: [
+          'barbell-row',
+          'lat-pulldown',
+          'seated-cable-row',
+          'face-pull',
+          'hammer-curl',
+          'cable-curl',
+        ],
+      },
+      {
+        dayName: 'Legs',
+        type: 'legs',
+        exercises: [
+          'back-squat',
+          'leg-press',
+          'leg-extension',
+          'lying-leg-curl',
+          'standing-calf-raise',
+          'plank',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'full-body-standard',
+    name: 'Full Body',
+    type: 'template',
+    days: [
+      {
+        dayName: 'Full Body',
+        type: 'full_body',
+        exercises: [
+          'barbell-bench-press',
+          'barbell-row',
+          'back-squat',
+          'overhead-press',
+          'lat-pulldown',
+          'romanian-deadlift',
+        ],
+      },
+    ],
+  },
+  {
     id: 'upper-lower-arch',
     name: 'Upper/Lower',
     type: 'template',
