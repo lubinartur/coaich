@@ -9,6 +9,7 @@ import type {
   WorkoutSession,
 } from '@/types';
 import { EXERCISE_SEED } from '@/constants/exercises';
+import { PRESET_PROGRAMS } from '@/constants/workoutPrograms';
 
 export interface CoachMemoryEntry {
   id: string;
@@ -65,6 +66,20 @@ export async function seedExercisesIfEmpty(): Promise<void> {
   const missing = EXERCISE_SEED.filter((ex) => !existingIds.has(ex.id));
   if (missing.length > 0) {
     await db.exercises.bulkPut(missing);
+  }
+}
+
+/**
+ * Seed multi-day preset programs (`PRESET_PROGRAMS`) on first launch.
+ *
+ * Idempotent: only inserts on an empty table so user-edited programs are not overwritten.
+ * For users who already have programs, missing presets are *not* back-filled (their library
+ * is their own); add an explicit migration if that becomes desirable.
+ */
+export async function seedProgramsIfEmpty(): Promise<void> {
+  const n = await db.programs.count();
+  if (n === 0) {
+    await db.programs.bulkPut([...PRESET_PROGRAMS]);
   }
 }
 

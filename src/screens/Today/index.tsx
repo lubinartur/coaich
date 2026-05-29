@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, Dumbbell, Sparkles, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
-  EMPTY_WORKOUT_TEMPLATE,
   WORKOUT_PROGRAM_TEMPLATES,
+  getNextProgramDay,
+  templateForProgramDay,
   type LoggerTemplateExercise,
 } from '@/constants/workoutPrograms';
 import {
@@ -23,16 +24,13 @@ import {
   type ProgressionStatus,
 } from '@/services/progressionEngine';
 import { useTranslation } from '@/hooks/useTranslation';
-import type { Exercise, Profile } from '@/types';
+import type { Exercise, Profile, Program, ProgramDay } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
 
-const QUICK_PROGRAMS = [
-  { emoji: '🔥', program: 'push' as const },
-  { emoji: '🧗', program: 'pull' as const },
-  { emoji: '🦵', program: 'legs' as const },
-  { emoji: '🏋️', program: 'full_body' as const },
-  { emoji: '✨', program: 'custom' as const },
-];
+type ProgramWithNext = {
+  program: Program;
+  nextDay: ProgramDay;
+};
 
 type TodayExerciseRow = {
   exerciseId: string;
@@ -124,6 +122,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   const [coachAiLoading, setCoachAiLoading] = useState(false);
   const [coachMessageExpanded, setCoachMessageExpanded] = useState(false);
   const [expandedExerciseIds, setExpandedExerciseIds] = useState<string[]>([]);
+  const [programsWithNext, setProgramsWithNext] = useState<ProgramWithNext[]>([]);
 
   useEffect(() => {
     setCoachMessageExpanded(false);
@@ -133,7 +132,35 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     setExpandedExerciseIds([]);
   }, [rows]);
 
-  const getProgramLabel = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [programs, recent] = await Promise.all([
+          db.programs.toArray(),
+          db.workoutSessions.orderBy('finishedAt').reverse().limit(20).toArray(),
+        ]);
+        if (cancelled) return;
+        const list: ProgramWithNext[] = programs
+          .filter((p) => p.days.length > 0)
+          .map((p) => {
+            const { day } = getNextProgramDay(p, recent);
+            return { program: p, nextDay: day };
+          });
+        setProgramsWithNext(list);
+      } catch (err) {
+        console.error('[Today] load programs error', err);
+        if (!cancelled) setProgramsWithNext([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  type QuickProgramKey = 'push' | 'pull' | 'legs' | 'full_body' | 'custom';
+
+  const getProgramLabel = (program: QuickProgramKey) => {
     switch (program) {
       case 'push':
         return t('push');
@@ -148,7 +175,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     }
   };
 
-  const getWorkoutNameForProgram = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
+  const getWorkoutNameForProgram = (program: QuickProgramKey) => {
     switch (program) {
       case 'push':
         return t('pushWorkoutName');
@@ -189,42 +216,11 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     }
   };
 
-  const startQuickProgram = (program: (typeof QUICK_PROGRAMS)[number]['program']) => {
-    if (program === 'custom') {
-      onStartWorkout?.({
-        workoutName: getWorkoutNameForProgram('custom'),
-        workoutType: 'custom',
-        exerciseTemplate: EMPTY_WORKOUT_TEMPLATE,
-        openExercisePickerOnMount: true,
-      });
-      return;
-    }
-    const map = {
-      push: {
-        workoutName: getWorkoutNameForProgram('push'),
-        workoutType: 'push',
-        template: WORKOUT_PROGRAM_TEMPLATES.push,
-      },
-      pull: {
-        workoutName: getWorkoutNameForProgram('pull'),
-        workoutType: 'pull',
-        template: WORKOUT_PROGRAM_TEMPLATES.pull,
-      },
-      legs: {
-        workoutName: getWorkoutNameForProgram('legs'),
-        workoutType: 'legs',
-        template: WORKOUT_PROGRAM_TEMPLATES.legs,
-      },
-      full_body: {
-        workoutName: getWorkoutNameForProgram('full_body'),
-        workoutType: 'full_body',
-        template: WORKOUT_PROGRAM_TEMPLATES.full_body,
-      },
-    }[program];
+  const startProgramDay = (day: ProgramDay) => {
     onStartWorkout?.({
-      workoutName: map.workoutName,
-      workoutType: map.workoutType,
-      exerciseTemplate: map.template,
+      workoutName: day.dayName,
+      workoutType: day.type,
+      exerciseTemplate: templateForProgramDay(day),
       openExercisePickerOnMount: false,
     });
   };
@@ -633,42 +629,44 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         </div>
       </section>
 
-      {/* Tactical templates — 2×2 style grid */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between px-2">
-          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
-            {t('tacticalTemplates')}
-          </h3>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          {QUICK_PROGRAMS.map((prog, idx) => (
-            <button
-              key={prog.program}
-              type="button"
-              onClick={() => startQuickProgram(prog.program)}
-              className={`relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-[#222222] p-5 text-left transition-all active:scale-[0.98] ${
-                idx === 0 ? 'bg-[#181818]' : 'bg-[#111111]'
-              }`}
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#222222] text-2xl" aria-hidden>
-                {prog.emoji}
-              </span>
-              <div className="relative z-10">
-                <span className="block text-lg font-black tracking-tight text-white">
-                  {getProgramLabel(prog.program)}
+      {/* Programs — loaded from db.programs (seeded from PRESET_PROGRAMS). */}
+      {programsWithNext.length > 0 ? (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between px-2">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+              {t('tacticalTemplates')}
+            </h3>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {programsWithNext.map(({ program, nextDay }, idx) => (
+              <button
+                key={program.id}
+                type="button"
+                onClick={() => startProgramDay(nextDay)}
+                className={`relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-[#222222] p-5 text-left transition-all active:scale-[0.98] ${
+                  idx === 0 ? 'bg-[#181818]' : 'bg-[#111111]'
+                }`}
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#222222]" aria-hidden>
+                  <Dumbbell className="h-5 w-5 text-[#8B5CF6]" />
                 </span>
-                <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
-                  {t('quickStart')}
-                </span>
-              </div>
-              <Dumbbell
-                className="pointer-events-none absolute -bottom-2 -right-2 h-[60px] w-[60px] rotate-12 scale-150 opacity-10 grayscale"
-                aria-hidden
-              />
-            </button>
-          ))}
-        </div>
-      </section>
+                <div className="relative z-10">
+                  <span className="block text-lg font-black tracking-tight text-white">
+                    {program.name}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
+                    {t('nextDay').toUpperCase()}: {nextDay.dayName}
+                  </span>
+                </div>
+                <Dumbbell
+                  className="pointer-events-none absolute -bottom-2 -right-2 h-[60px] w-[60px] rotate-12 scale-150 opacity-10 grayscale"
+                  aria-hidden
+                />
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </motion.div>
   );
 }

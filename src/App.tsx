@@ -5,7 +5,7 @@ import {
   WORKOUT_PROGRAM_TEMPLATES,
   type LoggerTemplateExercise,
 } from '@/constants/workoutPrograms';
-import { db, hasProfile, seedExercisesIfEmpty } from '@/services/db';
+import { db, hasProfile, seedExercisesIfEmpty, seedProgramsIfEmpty } from '@/services/db';
 import OnboardingScreen from '@/screens/Onboarding';
 import LoggerScreen from '@/screens/Logger';
 import RatingScreen from '@/screens/Rating';
@@ -52,6 +52,7 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       await seedExercisesIfEmpty();
+      await seedProgramsIfEmpty();
       const exists = await hasProfile();
       setNeedsOnboarding(!exists);
       setBooting(false);
