@@ -284,6 +284,57 @@ function findNextIncompleteExIdx(list: LoggerExercise[], completedIdx: number): 
   return null;
 }
 
+const WORKOUT_DRAFT_KEY = 'coaich-workout-draft';
+/** Drafts older than this are considered stale and ignored on restore. */
+const WORKOUT_DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+interface WorkoutDraft {
+  exercises: LoggerExercise[];
+  workoutName: string;
+  workoutType: string;
+  workoutStartMs: number | null;
+  sessionStartedAtIso: string | null;
+  isStarted: boolean;
+  savedAt: number;
+}
+
+/** Synchronously read a non-stale workout draft from localStorage (used as a lazy state initializer). */
+function readFreshWorkoutDraft(): WorkoutDraft | null {
+  try {
+    const raw = localStorage.getItem(WORKOUT_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<WorkoutDraft>;
+    if (
+      !parsed ||
+      !Array.isArray(parsed.exercises) ||
+      parsed.exercises.length === 0 ||
+      typeof parsed.savedAt !== 'number'
+    ) {
+      return null;
+    }
+    if (Date.now() - parsed.savedAt > WORKOUT_DRAFT_MAX_AGE_MS) return null;
+    return {
+      exercises: parsed.exercises as LoggerExercise[],
+      workoutName: typeof parsed.workoutName === 'string' ? parsed.workoutName : '',
+      workoutType: typeof parsed.workoutType === 'string' ? parsed.workoutType : 'custom',
+      workoutStartMs: typeof parsed.workoutStartMs === 'number' ? parsed.workoutStartMs : null,
+      sessionStartedAtIso: typeof parsed.sessionStartedAtIso === 'string' ? parsed.sessionStartedAtIso : null,
+      isStarted: parsed.isStarted === true,
+      savedAt: parsed.savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearWorkoutDraft(): void {
+  try {
+    localStorage.removeItem(WORKOUT_DRAFT_KEY);
+  } catch {
+    // ignore storage errors (private mode / quota)
+  }
+}
+
 export interface LoggerScreenProps {
   workoutName: string;
   workoutType: string;
@@ -325,6 +376,12 @@ export default function LoggerScreen({
   const [restTick, setRestTick] = useState(0);
   const [restZeroFlash, setRestZeroFlash] = useState(false);
   const restCompleteHandledRef = useRef(false);
+  /** Non-null while a recoverable draft is awaiting the user's restore/discard decision. */
+  const [restoreDraft, setRestoreDraft] = useState<WorkoutDraft | null>(() => readFreshWorkoutDraft());
+  /** Set when a draft is restored so name/type follow the draft rather than the freshly-mounted props. */
+  const [restoredMeta, setRestoredMeta] = useState<{ name: string; type: string } | null>(null);
+  const effectiveWorkoutName = restoredMeta?.name ?? workoutName;
+  const effectiveWorkoutType = restoredMeta?.type ?? workoutType;
   const addExerciseFooterLabel = lang === 'ru' ? 'Упражнение' : 'Exercise';
   const startFooterLabel = lang === 'ru' ? 'Начать' : 'Start';
   const finishFooterLabel = lang === 'ru' ? 'Завершить' : 'Finish';
@@ -343,7 +400,7 @@ export default function LoggerScreen({
   };
 
   const localizedWorkoutName = (() => {
-    switch (workoutType) {
+    switch (effectiveWorkoutType) {
       case 'push':
         return t('pushWorkoutName');
       case 'pull':
@@ -353,9 +410,9 @@ export default function LoggerScreen({
       case 'full_body':
         return t('fullBodyWorkoutName');
       case 'custom':
-        return workoutName === 'Custom Workout' ? t('customWorkoutName') : toDisplayName(workoutName);
+        return effectiveWorkoutName === 'Custom Workout' ? t('customWorkoutName') : toDisplayName(effectiveWorkoutName);
       default:
-        return toDisplayName(workoutName);
+        return toDisplayName(effectiveWorkoutName);
     }
   })();
 
@@ -400,6 +457,38 @@ export default function LoggerScreen({
       cancelled = true;
     };
   }, [workoutName, workoutType, templateKey, exerciseTemplate]);
+
+  /**
+   * Persist an in-progress workout to localStorage on every change so an iOS PWA kill
+   * doesn't lose data. Skipped while a restore prompt is pending so the recoverable
+   * draft isn't overwritten before the user decides.
+   */
+  useEffect(() => {
+    if (restoreDraft) return;
+    if (exercises.length === 0) return;
+    const draft: WorkoutDraft = {
+      exercises,
+      workoutName: effectiveWorkoutName,
+      workoutType: effectiveWorkoutType,
+      workoutStartMs,
+      sessionStartedAtIso,
+      isStarted,
+      savedAt: Date.now(),
+    };
+    try {
+      localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // ignore storage errors (private mode / quota)
+    }
+  }, [
+    exercises,
+    effectiveWorkoutName,
+    effectiveWorkoutType,
+    workoutStartMs,
+    sessionStartedAtIso,
+    isStarted,
+    restoreDraft,
+  ]);
 
   /** Re-sync header elapsed when returning from background; no interval for workout wall time. */
   useEffect(() => {
@@ -456,8 +545,27 @@ export default function LoggerScreen({
 
   const tryClose = () => {
     if (window.confirm(t('endWorkout'))) {
+      clearWorkoutDraft();
       onClose();
     }
+  };
+
+  const handleRestoreDraft = () => {
+    if (!restoreDraft) return;
+    // Invalidate any in-flight template build so it can't overwrite the restored exercises.
+    templateLoadGenRef.current += 1;
+    setExercises(restoreDraft.exercises);
+    setExpandedExIdx(restoreDraft.exercises.length > 0 ? 0 : null);
+    setRestoredMeta({ name: restoreDraft.workoutName, type: restoreDraft.workoutType });
+    setWorkoutStartMs(restoreDraft.workoutStartMs);
+    setSessionStartedAtIso(restoreDraft.sessionStartedAtIso);
+    setIsStarted(restoreDraft.isStarted);
+    setRestoreDraft(null);
+  };
+
+  const handleDiscardDraft = () => {
+    clearWorkoutDraft();
+    setRestoreDraft(null);
   };
 
   const dismissRestTimer = useCallback(() => {
@@ -664,8 +772,8 @@ export default function LoggerScreen({
     const totalVolume = computeTotalVolume(exercises);
     const session: WorkoutSession = {
       id,
-      name: workoutName,
-      type: toWorkoutType(workoutType),
+      name: effectiveWorkoutName,
+      type: toWorkoutType(effectiveWorkoutType),
       startedAt: sessionStartedAtIso ?? new Date(startMs).toISOString(),
       finishedAt,
       durationMinutes,
@@ -687,8 +795,17 @@ export default function LoggerScreen({
     if (prRows.length > 0) {
       await db.prRecords.bulkAdd(prRows);
     }
+    clearWorkoutDraft();
     onFinish(id);
   };
+
+  const restoreDraftName = restoreDraft ? toDisplayName(restoreDraft.workoutName) : '';
+  const restoreBannerText =
+    lang === 'ru'
+      ? `Найдена незавершённая тренировка ${restoreDraftName}. Восстановить?`
+      : `Found an unfinished workout: ${restoreDraftName}. Restore it?`;
+  const restoreLabel = lang === 'ru' ? 'Восстановить' : 'Restore';
+  const startFreshLabel = lang === 'ru' ? 'Начать заново' : 'Start fresh';
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-[#0A0A0A] pt-1">
@@ -757,6 +874,28 @@ export default function LoggerScreen({
           </div>
         </header>
       </div>
+
+      {restoreDraft ? (
+        <div className="shrink-0 border-b border-[#8B5CF6]/30 bg-[#8B5CF6]/10 px-4 py-3">
+          <p className="text-sm font-medium leading-snug text-white">{restoreBannerText}</p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={handleRestoreDraft}
+              className="flex-1 whitespace-nowrap rounded-xl bg-[#8B5CF6] py-2.5 text-sm font-bold text-white transition-all active:scale-[0.98]"
+            >
+              {restoreLabel}
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardDraft}
+              className="flex-1 whitespace-nowrap rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-2.5 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
+            >
+              {startFreshLabel}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="min-h-0 flex-1 space-y-10 overflow-y-auto px-4 py-8 pb-40 no-scrollbar">
         {exercises.length === 0 ? (
