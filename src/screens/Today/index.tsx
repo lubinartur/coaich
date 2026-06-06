@@ -441,10 +441,17 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         : { accent: '#F59E0B', text: t('recoveryModerate'), pillClass: 'border-[#F59E0B]/40 bg-[#F59E0B]/15 text-[#F59E0B]' }
     : null;
 
+  const injuries = profile?.injuries ?? [];
+  const injuryChips: string[] = [];
+  if (injuries.includes('shoulders')) injuryChips.push(t('qaShoulderHurts'));
+  if (injuries.includes('knees')) injuryChips.push(t('qaKneePain'));
+  if (injuries.includes('back') || injuries.includes('lower_back')) injuryChips.push(t('qaBackPain'));
+  if (injuries.includes('elbows')) injuryChips.push(t('qaElbowPain'));
+
   const quickActions = [
+    ...injuryChips,
     t('qaWhyWorkout'),
     t('qaWhyWeight'),
-    t('qaShoulderHurts'),
     t('qaReplaceExercise'),
     t('qaShorterWorkout'),
     t('qaDidntSleep'),

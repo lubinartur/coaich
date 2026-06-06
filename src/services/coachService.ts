@@ -63,6 +63,8 @@ ATHLETE: ${data.profile.experience} level, goal: ${data.profile.goal}
 
 PHARMACOLOGY: ${data.profile.pharmacology}
 
+INJURIES: ${data.profile.injuries.join(', ') || 'none'}
+
 LAST WORKOUT: ${data.lastSession != null ? `${data.lastSession.name} — ${data.hoursSinceLast}h ago` : 'No completed workouts yet'}
 
 RECOMMENDED TODAY: ${data.recommendation.type} (${data.recommendation.name})
@@ -85,6 +87,8 @@ ${data.memoryFindings.map((f) => `- ${f}`).join('\n')}
 Write ONE short paragraph (2 sentences) explaining why this workout is recommended today.
 
 Mention recovery time or volume balance if relevant.
+
+If athlete has injuries, mention relevant modifications in your recommendation.
 
 Highlight the workout name in your response.
 
@@ -341,8 +345,10 @@ export const generateCoachChatReply = async (
 
   const system = `You are a personal trainer. Answer briefly and practically (2-4 short sentences max). Be direct and supportive, never robotic.
 User profile: ${profileSummary}.
+User injuries/limitations: ${profile.injuries.join(', ') || 'none'}.
 Last workout: ${lastSummary}.
 Today's recommendation: ${recoSummary}.
+If user mentions pain or injury during chat, suggest alternative exercises and recommend reducing load on affected area.
 Always reply in ${ru ? 'Russian' : 'English'}.
 Respond with plain text only — no markdown, no asterisks, no bullet lists.`;
 

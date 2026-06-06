@@ -39,6 +39,8 @@ ATHLETE PROFILE:
 
 - Pharmacology: ${data.profile.pharmacology}
 
+- INJURIES: ${data.profile.injuries.join(', ') || 'none'}
+
 ---
 
 WORKOUT:
@@ -146,6 +148,8 @@ Rules:
 - nextTargets — exerciseName is required for every entry, never omit it.
 
 - wentWell and toImprove: 2-3 items each, no more
+
+- If athlete has injuries, avoid recommending increased load on exercises that stress those areas
 
 - Language: ${data.profile.language === 'ru' ? 'Russian' : 'English'}
 
