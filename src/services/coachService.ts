@@ -1,5 +1,6 @@
 import { checkDeloadNeeded, type DeloadCheckResult } from '@/services/progressionEngine';
 import { db } from '@/services/db';
+import { VOLUME_TARGETS } from '@/constants/progression';
 import type { MuscleGroup, Profile, WorkoutSession, WorkoutType } from '@/types';
 
 const COACH_CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
@@ -242,6 +243,62 @@ export const generateCoachMessage = async (data: CoachPromptData): Promise<strin
     return fallback;
   }
 };
+
+export interface RecoveryScore {
+  score: number;
+  label: 'ready' | 'moderate' | 'low';
+}
+
+/**
+ * Heuristic 0-100 readiness score from a base of 50, adjusted by recovery time since the
+ * last session, how that session felt (ratings), and this week's total volume vs summed MAV.
+ * Higher = fresher / safer to push.
+ */
+export async function calculateRecoveryScore(profile: Profile): Promise<RecoveryScore> {
+  const now = new Date();
+  let score = 50;
+
+  const recent = await db.workoutSessions.orderBy('finishedAt').reverse().limit(1).toArray();
+  const lastSession = recent[0];
+
+  // Recovery time since the last workout.
+  if (lastSession) {
+    const hours = hoursSince(lastSession.finishedAt, now);
+    if (hours < 24) score -= 30;
+    else if (hours <= 48) score += 20;
+    else if (hours <= 72) score += 30;
+    else score += 20; // long gap = slight detraining, not full bonus
+  }
+
+  // How the last session felt.
+  const ratings = lastSession?.ratings ?? [];
+  if (ratings.length > 0) {
+    const hasBad = ratings.some((r) => r.rating === 'bad');
+    const allGood = ratings.every((r) => r.rating === 'good');
+    if (hasBad) score -= 10;
+    else if (allGood) score += 20;
+    else score += 10; // mix of good/okay
+  }
+
+  // Weekly accumulated volume vs maximum adaptive volume (summed across muscle groups).
+  const weekStartIso = startOfWeekMonday(now).toISOString();
+  const weekSessions = await db.workoutSessions.where('finishedAt').aboveOrEqual(weekStartIso).toArray();
+  const weekly = countWeeklySetsByMuscleGroup(weekSessions, now);
+  const totalSets = Object.values(weekly).reduce((sum, n) => sum + n, 0);
+  const totalMav = (Object.keys(weekly) as MuscleGroup[]).reduce(
+    (sum, mg) => sum + (VOLUME_TARGETS[mg]?.mav ?? 0),
+    0,
+  );
+  const mavRatio = totalMav > 0 ? totalSets / totalMav : 0;
+  if (mavRatio < 0.5) score += 20;
+  else if (mavRatio < 0.8) score += 10;
+  else if (mavRatio <= 1) score += 0;
+  else score -= 20;
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const label: RecoveryScore['label'] = score >= 75 ? 'ready' : score >= 50 ? 'moderate' : 'low';
+  return { score, label };
+}
 
 export interface CoachChatMessage {
   role: 'user' | 'assistant';

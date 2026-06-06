@@ -6,6 +6,7 @@ import {
   type LoggerTemplateExercise,
 } from '@/constants/workoutPrograms';
 import { db, hasProfile, seedExercisesIfEmpty, seedProgramsIfEmpty } from '@/services/db';
+import { seedJune4Workout } from '@/scripts/seedWorkout';
 import OnboardingScreen from '@/screens/Onboarding';
 import LoggerScreen from '@/screens/Logger';
 import RatingScreen from '@/screens/Rating';
@@ -53,6 +54,8 @@ export default function App() {
     void (async () => {
       await seedExercisesIfEmpty();
       await seedProgramsIfEmpty();
+      const alreadySeeded = await db.workoutSessions.get('manual-june4-lower-b');
+      if (!alreadySeeded) await seedJune4Workout();
       const exists = await hasProfile();
       setNeedsOnboarding(!exists);
       setBooting(false);

@@ -211,6 +211,10 @@ export const translations = {
     qaReplaceExercise: 'Replace an exercise',
     qaShorterWorkout: 'Make workout shorter',
     qaDidntSleep: "I didn't sleep well",
+    recoveryScore: 'RECOVERY',
+    recoveryReady: 'Ready to progress',
+    recoveryModerate: 'Train without failure',
+    recoveryLow: 'Rest needed',
   },
   ru: {
     today: 'Сегодня',
@@ -424,6 +428,10 @@ export const translations = {
     qaReplaceExercise: 'Заменить упражнение',
     qaShorterWorkout: 'Сделать тренировку короче',
     qaDidntSleep: 'Я плохо спал',
+    recoveryScore: 'ВОССТАНОВЛЕНИЕ',
+    recoveryReady: 'Готов к прогрессии',
+    recoveryModerate: 'Тренировка без отказа',
+    recoveryLow: 'Нужен отдых',
   },
 } as const;
 

@@ -9,10 +9,12 @@ import {
 } from '@/constants/workoutPrograms';
 import {
   buildCoachPromptData,
+  calculateRecoveryScore,
   generateCoachChatReply,
   generateCoachMessage,
   getWorkoutRecommendation,
   type CoachChatMessage,
+  type RecoveryScore,
   type RecommendedWorkoutType,
   type WorkoutRecommendation,
 } from '@/services/coachService';
@@ -126,6 +128,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   const [expandedExerciseIds, setExpandedExerciseIds] = useState<string[]>([]);
   const [programsWithNext, setProgramsWithNext] = useState<ProgramWithNext[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryScore | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<CoachChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -240,10 +243,18 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
       setLoading(true);
       setCoachAiMessage(null);
       setCoachAiLoading(false);
+      setRecovery(null);
       try {
         const profile = await getProfile();
         if (cancelled) return;
         setProfile(profile ?? null);
+        if (profile) {
+          void calculateRecoveryScore(profile)
+            .then((r) => {
+              if (!cancelled) setRecovery(r);
+            })
+            .catch((err) => console.error('[Today] recovery score error', err));
+        }
 
         const buildRowsForTemplate = async (
           p: Profile,
@@ -422,6 +433,14 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     return '';
   })();
 
+  const recoveryView = recovery
+    ? recovery.label === 'ready'
+      ? { dot: '🟢', accent: '#22C55E', text: t('recoveryReady'), pillClass: 'border-[#22C55E]/40 bg-[#22C55E]/15 text-[#22C55E]' }
+      : recovery.label === 'low'
+        ? { dot: '🔴', accent: '#EF4444', text: t('recoveryLow'), pillClass: 'border-[#EF4444]/40 bg-[#EF4444]/15 text-[#EF4444]' }
+        : { dot: '🟡', accent: '#F59E0B', text: t('recoveryModerate'), pillClass: 'border-[#F59E0B]/40 bg-[#F59E0B]/15 text-[#F59E0B]' }
+    : null;
+
   const quickActions = [
     t('qaWhyWorkout'),
     t('qaWhyWeight'),
@@ -489,6 +508,27 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           <Zap className="h-6 w-6 text-[#8B5CF6]" fill="currentColor" aria-hidden />
         </button>
       </header>
+
+      {/* Recovery score */}
+      {recoveryView ? (
+        <section
+          className="-mt-4 flex items-center justify-between gap-3 rounded-2xl border border-l-4 border-[#222222] bg-[#111111] px-5 py-4"
+          style={{ borderLeftColor: recoveryView.accent }}
+        >
+          <div className="flex items-baseline gap-3">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+              {t('recoveryScore')}
+            </span>
+            <span className="text-3xl font-black tabular-nums tracking-tighter text-white">{recovery?.score}</span>
+          </div>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${recoveryView.pillClass}`}
+          >
+            <span aria-hidden>{recoveryView.dot}</span>
+            {recoveryView.text}
+          </span>
+        </section>
+      ) : null}
 
       {/* Coach AI — glass accent */}
       <section className="relative overflow-hidden rounded-3xl border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 p-6 backdrop-blur-md">
