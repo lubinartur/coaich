@@ -243,6 +243,84 @@ export const generateCoachMessage = async (data: CoachPromptData): Promise<strin
   }
 };
 
+export interface CoachChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CoachChatContext {
+  profile: Profile;
+  recommendation: { type: string; name: string; reasoning: string };
+}
+
+/**
+ * Free-form coach chat reply. Builds a trainer system prompt from the user's profile,
+ * last logged session, and today's recommendation, then sends the running conversation
+ * history to the Anthropic proxy. Returns a localized fallback string on any failure.
+ */
+export const generateCoachChatReply = async (
+  context: CoachChatContext,
+  history: CoachChatMessage[],
+): Promise<string> => {
+  const { profile, recommendation } = context;
+  const ru = profile.language === 'ru';
+  const fallback = ru
+    ? 'Не удалось связаться с тренером. Попробуй ещё раз.'
+    : 'Could not reach the coach. Please try again.';
+
+  let lastSession: WorkoutSession | undefined;
+  try {
+    const recent = await db.workoutSessions.orderBy('finishedAt').reverse().limit(1).toArray();
+    lastSession = recent[0];
+  } catch {
+    // sessions table may be empty
+  }
+
+  const profileSummary = `${profile.experience} level, goal: ${profile.goal}, pharmacology: ${profile.pharmacology}`;
+  const lastSummary = lastSession
+    ? `${lastSession.name}, ${lastSession.exercises.length} exercises, ~${Math.round(lastSession.totalVolume)}kg total volume`
+    : 'No completed workouts yet';
+  const recoSummary = `${recommendation.name} (${recommendation.type}) — ${recommendation.reasoning}`;
+
+  const system = `You are a personal trainer. Answer briefly and practically (2-4 short sentences max). Be direct and supportive, never robotic.
+User profile: ${profileSummary}.
+Last workout: ${lastSummary}.
+Today's recommendation: ${recoSummary}.
+Always reply in ${ru ? 'Russian' : 'English'}.
+Respond with plain text only — no markdown, no asterisks, no bullet lists.`;
+
+  const messages = history
+    .filter((m) => m.content.trim().length > 0)
+    .map((m) => ({ role: m.role, content: m.content }));
+  if (messages.length === 0) return fallback;
+
+  try {
+    const res = await fetch('/api/anthropic', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: COACH_CLAUDE_MODEL,
+        max_tokens: COACH_MAX_TOKENS,
+        system,
+        messages,
+      }),
+    });
+
+    const rawJson = await res.json().catch(() => ({}));
+    if (!res.ok) return fallback;
+
+    const content = (rawJson as { content?: { type: string; text?: string }[] }).content;
+    const textBlock = content?.find((c) => c.type === 'text');
+    const text = textBlock?.text?.trim() ?? '';
+    return text.length > 0 ? text : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 function rotationFromLastSession(last: WorkoutSession | undefined, prev: WorkoutSession | undefined): RecommendedWorkoutType {
   if (!last) return 'push';
 

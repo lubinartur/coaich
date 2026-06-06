@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { ArrowRight, Dumbbell, Sparkles, Zap } from 'lucide-react';
-import { motion } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowRight, Dumbbell, MessageCircle, Send, Sparkles, X, Zap } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   WORKOUT_PROGRAM_TEMPLATES,
   getNextProgramDay,
@@ -9,8 +9,10 @@ import {
 } from '@/constants/workoutPrograms';
 import {
   buildCoachPromptData,
+  generateCoachChatReply,
   generateCoachMessage,
   getWorkoutRecommendation,
+  type CoachChatMessage,
   type RecommendedWorkoutType,
   type WorkoutRecommendation,
 } from '@/services/coachService';
@@ -123,6 +125,12 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   const [coachMessageExpanded, setCoachMessageExpanded] = useState(false);
   const [expandedExerciseIds, setExpandedExerciseIds] = useState<string[]>([]);
   const [programsWithNext, setProgramsWithNext] = useState<ProgramWithNext[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<CoachChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setCoachMessageExpanded(false);
@@ -235,6 +243,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
       try {
         const profile = await getProfile();
         if (cancelled) return;
+        setProfile(profile ?? null);
 
         const buildRowsForTemplate = async (
           p: Profile,
@@ -413,6 +422,49 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
     return '';
   })();
 
+  const quickActions = [
+    t('qaWhyWorkout'),
+    t('qaWhyWeight'),
+    t('qaShoulderHurts'),
+    t('qaReplaceExercise'),
+    t('qaShorterWorkout'),
+    t('qaDidntSleep'),
+  ];
+
+  const sendCoachMessage = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || chatLoading || !profile) return;
+    const userMsg: CoachChatMessage = { role: 'user', content: trimmed };
+    const nextHistory: CoachChatMessage[] = [...chatMessages, userMsg];
+    setChatMessages(nextHistory);
+    setChatInput('');
+    setChatLoading(true);
+    try {
+      const reply = await generateCoachChatReply(
+        {
+          profile,
+          recommendation: {
+            type: reco?.workoutType ?? 'rest',
+            name: reco?.workoutName ?? displayWorkoutName,
+            reasoning: reco?.reasoning ?? '',
+          },
+        },
+        nextHistory,
+      );
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+    } catch {
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: t('coachChatError') }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatMessages, chatLoading, chatOpen]);
+
   return (
     <motion.div
       className="flex flex-col gap-10 px-5 pb-10 pt-8"
@@ -489,6 +541,16 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           aria-hidden
         />
       </section>
+
+      {/* Ask Coach — opens chat sheet */}
+      <button
+        type="button"
+        onClick={() => setChatOpen(true)}
+        className="-mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#8B5CF6]/30 bg-transparent py-4 text-sm font-bold text-[#8B5CF6] transition-colors hover:bg-[#8B5CF6]/10 active:scale-[0.98]"
+      >
+        <MessageCircle className="h-[18px] w-[18px]" aria-hidden />
+        {t('askCoach')}
+      </button>
 
       {/* Workout card — hardware shell */}
       <section className="overflow-hidden rounded-[32px] border border-[#222222] bg-[#111111] p-1 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.8)]">
@@ -667,6 +729,127 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
           </div>
         </section>
       ) : null}
+
+      {/* Coach chat — bottom sheet */}
+      <AnimatePresence>
+        {chatOpen ? (
+          <motion.div
+            key="coach-chat"
+            className="fixed inset-0 z-[70] flex flex-col justify-end"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <button
+              type="button"
+              aria-label={t('close')}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setChatOpen(false)}
+            />
+            <motion.div
+              className="relative z-10 mx-auto flex max-h-[85vh] w-full max-w-[430px] flex-col rounded-t-3xl border-t border-[#222222] bg-[#111111] shadow-[0_-12px_48px_-12px_rgba(0,0,0,0.8)]"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+            >
+              <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[#2A2A2A]" aria-hidden />
+
+              <header className="flex shrink-0 items-center justify-between px-5 py-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#8B5CF6] shadow-lg shadow-[#8B5CF6]/30">
+                    <Sparkles className="h-4 w-4 text-white" fill="currentColor" aria-hidden />
+                  </div>
+                  <span className="text-lg font-black tracking-tight text-white">{t('coach')}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(false)}
+                  aria-label={t('close')}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#222222] bg-[#1C1C1C] text-[#6B7280] transition-colors hover:text-white"
+                >
+                  <X className="h-5 w-5" aria-hidden />
+                </button>
+              </header>
+
+              {/* Quick actions */}
+              <div className="shrink-0 px-4 pb-3">
+                <div className="flex flex-wrap gap-2">
+                  {quickActions.map((qa) => (
+                    <button
+                      key={qa}
+                      type="button"
+                      disabled={chatLoading}
+                      onClick={() => void sendCoachMessage(qa)}
+                      className="rounded-full border border-[#2A2A2A] bg-[#1C1C1C] px-3 py-1.5 text-xs font-medium text-white/90 transition-colors hover:border-[#8B5CF6]/40 hover:text-white disabled:opacity-40"
+                    >
+                      {qa}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 no-scrollbar">
+                {chatMessages.length === 0 && !chatLoading ? (
+                  <p className="px-1 py-6 text-center text-sm text-[#6B7280]">{t('coachChatEmpty')}</p>
+                ) : null}
+                {chatMessages.map((msg, i) => (
+                  <div
+                    key={i}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[82%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'rounded-br-sm bg-[#8B5CF6] font-medium text-white'
+                          : 'rounded-bl-sm border border-[#222222] bg-[#1C1C1C] text-white/90'
+                      }`}
+                    >
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+                {chatLoading ? (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-[#222222] bg-[#1C1C1C] px-4 py-3">
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[#8B5CF6] [animation-delay:-0.3s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[#8B5CF6] [animation-delay:-0.15s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[#8B5CF6]" />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Free input */}
+              <form
+                className="flex shrink-0 items-center gap-2 border-t border-[#222222] bg-[#141414] px-4 py-3"
+                style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void sendCoachMessage(chatInput);
+                }}
+              >
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder={t('coachChatPlaceholder')}
+                  className="min-w-0 flex-1 rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] px-4 py-3 text-sm text-white placeholder:text-[#6B7280] focus:border-[#8B5CF6]/50 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={chatLoading || chatInput.trim().length === 0}
+                  aria-label={t('sendMessage')}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25 transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Send className="h-5 w-5" aria-hidden />
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </motion.div>
   );
 }
