@@ -435,10 +435,10 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
 
   const recoveryView = recovery
     ? recovery.label === 'ready'
-      ? { dot: '🟢', accent: '#22C55E', text: t('recoveryReady'), pillClass: 'border-[#22C55E]/40 bg-[#22C55E]/15 text-[#22C55E]' }
+      ? { accent: '#22C55E', text: t('recoveryReady'), pillClass: 'border-[#22C55E]/40 bg-[#22C55E]/15 text-[#22C55E]' }
       : recovery.label === 'low'
-        ? { dot: '🔴', accent: '#EF4444', text: t('recoveryLow'), pillClass: 'border-[#EF4444]/40 bg-[#EF4444]/15 text-[#EF4444]' }
-        : { dot: '🟡', accent: '#F59E0B', text: t('recoveryModerate'), pillClass: 'border-[#F59E0B]/40 bg-[#F59E0B]/15 text-[#F59E0B]' }
+        ? { accent: '#EF4444', text: t('recoveryLow'), pillClass: 'border-[#EF4444]/40 bg-[#EF4444]/15 text-[#EF4444]' }
+        : { accent: '#F59E0B', text: t('recoveryModerate'), pillClass: 'border-[#F59E0B]/40 bg-[#F59E0B]/15 text-[#F59E0B]' }
     : null;
 
   const quickActions = [
@@ -511,20 +511,19 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
 
       {/* Recovery score */}
       {recoveryView ? (
-        <section
-          className="-mt-4 flex items-center justify-between gap-3 rounded-2xl border border-l-4 border-[#222222] bg-[#111111] px-5 py-4"
-          style={{ borderLeftColor: recoveryView.accent }}
-        >
-          <div className="flex items-baseline gap-3">
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+        <section className="flex items-center justify-between gap-4 rounded-3xl border border-[#222222] bg-[#111111] p-6">
+          <div className="min-w-0">
+            <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
               {t('recoveryScore')}
             </span>
-            <span className="text-3xl font-black tabular-nums tracking-tighter text-white">{recovery?.score}</span>
+            <span className="mt-1 block text-4xl font-black tabular-nums tracking-tighter text-white">
+              {recovery?.score}
+            </span>
           </div>
           <span
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${recoveryView.pillClass}`}
+            className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3.5 py-2 text-xs font-bold ${recoveryView.pillClass}`}
           >
-            <span aria-hidden>{recoveryView.dot}</span>
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: recoveryView.accent }} aria-hidden />
             {recoveryView.text}
           </span>
         </section>
