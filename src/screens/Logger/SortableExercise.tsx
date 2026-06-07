@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowLeftRight, Check, CheckCircle2, GripVertical, Minus, Plus, Trash2, X } from 'lucide-react';
+import { ArrowLeftRight, Check, CheckCircle2, GripVertical, Image, Minus, Plus, Trash2, X } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getExerciseGif } from '@/services/exerciseGifService';
@@ -74,14 +74,12 @@ export default function SortableExercise({
   });
 
   const [gifUrl, setGifUrl] = useState<string | null>(null);
-  const [gifLoading, setGifLoading] = useState(false);
   const [gifFetched, setGifFetched] = useState(false);
   const [gifFullscreen, setGifFullscreen] = useState(false);
 
   useEffect(() => {
     if (!expanded || gifFetched) return;
     let cancelled = false;
-    setGifLoading(true);
     void getExerciseGif(ex.name)
       .then((url) => {
         if (cancelled) return;
@@ -91,9 +89,7 @@ export default function SortableExercise({
         if (!cancelled) setGifUrl(null);
       })
       .finally(() => {
-        if (cancelled) return;
-        setGifLoading(false);
-        setGifFetched(true);
+        if (!cancelled) setGifFetched(true);
       });
     return () => {
       cancelled = true;
@@ -212,48 +208,59 @@ export default function SortableExercise({
         ) : (
           <>
             <div className="flex items-start justify-between gap-3 border-b border-[#222222] px-4 pb-4 pt-3">
-              <button type="button" onClick={onAccordionToggle} className="min-w-0 flex-1 touch-manipulation text-left">
-                <h3 className="text-2xl font-bold tracking-tight text-white">{toDisplayName(ex.name)}</h3>
-                <div className="mt-3 w-full min-w-0 space-y-2 text-[12px] font-bold tracking-wide text-[#6B7280]">
-                  {recommendBadge ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={recommendBadge.badgeClass}>
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${recommendBadge.dotClass} ${
-                            recommendBadge.pulse ? 'animate-pulse' : ''
-                          }`}
-                          aria-hidden
-                        />
-                        <span>{getBadgeLabel(recommendBadge.label)}</span>
-                      </span>
-                    </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onAccordionToggle}
+                    className="min-w-0 flex-1 touch-manipulation text-left"
+                  >
+                    <h3 className="truncate text-2xl font-bold tracking-tight text-white">{toDisplayName(ex.name)}</h3>
+                  </button>
+                  {gifUrl ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setGifFullscreen(true);
+                      }}
+                      className="shrink-0 rounded-lg bg-white/5 p-1.5 text-white/40 transition-colors hover:text-white/70"
+                      aria-label={toDisplayName(ex.name)}
+                    >
+                      <Image className="h-4 w-4" aria-hidden />
+                    </button>
                   ) : null}
-                  {targetLineDisplay ? (
-                    <p className="font-mono text-base font-semibold leading-snug text-[#8B5CF6]">{targetLineDisplay}</p>
-                  ) : null}
-                  {expandedMeta}
                 </div>
-              </button>
-              {gifLoading ? (
-                <div className="h-[112px] w-[112px] shrink-0 animate-pulse rounded-xl bg-[#1C1C1C]" aria-hidden />
-              ) : gifUrl ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setGifFullscreen(true);
-                  }}
-                  className="h-[112px] w-[112px] shrink-0 overflow-hidden rounded-xl border border-[#222222] bg-white transition-transform active:scale-95"
-                  aria-label={toDisplayName(ex.name)}
-                >
-                  <img
-                    src={gifUrl}
-                    alt={toDisplayName(ex.name)}
-                    loading="lazy"
-                    className="h-full w-full object-contain"
-                  />
-                </button>
-              ) : null}
+                {recommendBadge || targetLineDisplay || expandedMeta ? (
+                  <button
+                    type="button"
+                    onClick={onAccordionToggle}
+                    className="mt-3 block w-full touch-manipulation text-left"
+                  >
+                    <div className="w-full min-w-0 space-y-2 text-[12px] font-bold tracking-wide text-[#6B7280]">
+                      {recommendBadge ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={recommendBadge.badgeClass}>
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${recommendBadge.dotClass} ${
+                                recommendBadge.pulse ? 'animate-pulse' : ''
+                              }`}
+                              aria-hidden
+                            />
+                            <span>{getBadgeLabel(recommendBadge.label)}</span>
+                          </span>
+                        </div>
+                      ) : null}
+                      {targetLineDisplay ? (
+                        <p className="font-mono text-base font-semibold leading-snug text-[#8B5CF6]">
+                          {targetLineDisplay}
+                        </p>
+                      ) : null}
+                      {expandedMeta}
+                    </div>
+                  </button>
+                ) : null}
+              </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
