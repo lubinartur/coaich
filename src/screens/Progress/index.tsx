@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { motion } from 'motion/react';
+import { ArrowUpRight, TrendingDown, TrendingUp } from 'lucide-react';
+import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { Card } from '@/components/ui';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
+import { canonicalExerciseId } from '@/services/progressionEngine';
 import {
   allTimeBestEpley1RM,
   BENCHMARK_LIFT_DEFS,
@@ -13,8 +17,22 @@ import {
   splitAverage1RM,
   type SplitKey,
   volumeRowsForUi,
+  weightProgressionSeries,
 } from '@/services/progressMetrics';
 import type { WorkoutSession } from '@/types';
+
+/** Sessions where this exercise has at least one completed set with weight & reps. */
+function countSessionsWithLiftData(sessions: WorkoutSession[], exerciseId: string): number {
+  const cid = canonicalExerciseId(exerciseId);
+  let n = 0;
+  for (const s of sessions) {
+    const ex = s.exercises.find((e) => canonicalExerciseId(e.exerciseId) === cid);
+    if (!ex) continue;
+    const has = ex.sets.some((st) => st.completed && st.weight > 0 && st.reps > 0);
+    if (has) n += 1;
+  }
+  return n;
+}
 
 function formatSignedKg(delta: number): string {
   if (delta === 0) return '+0';
@@ -29,7 +47,56 @@ function formatPct(p: number | null): string {
   return `${sign}${p.toFixed(1)}%`;
 }
 
+function formatChartWeight(w: number): string {
+  return Number.isInteger(w) ? String(w) : (Math.round(w * 10) / 10).toString();
+}
+
+function ProgressionChart({ data }: { data: { label: string; weight: number }[] }) {
+  const weights = data.map((d) => d.weight);
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  const pad = Math.max(2.5, (max - min) * 0.2);
+  const domainMin = Math.max(0, Math.floor(min - pad));
+  const domainMax = Math.ceil(max + pad);
+  return (
+    <div className="h-[120px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: -12 }}>
+          <XAxis
+            dataKey="label"
+            tick={{ fill: '#6B7280', fontSize: 10 }}
+            tickLine={false}
+            axisLine={false}
+            minTickGap={20}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            domain={[domainMin, domainMax]}
+            tick={{ fill: '#6B7280', fontSize: 10 }}
+            tickLine={false}
+            axisLine={false}
+            width={34}
+            allowDecimals={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="weight"
+            stroke="#8B5CF6"
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: '#8B5CF6', strokeWidth: 0 }}
+            activeDot={{ r: 4, fill: '#8B5CF6', strokeWidth: 0 }}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+const SATURATION_KEYS = ['chest', 'back', 'shoulders', 'legs'] as const;
+
 export default function ProgressScreen() {
+  const { t, locale } = useTranslation();
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -83,6 +150,7 @@ export default function ProgressScreen() {
       const thisBest = bestEpley1RMInWindow(sessions, exerciseId, thisStart, thisEnd);
       const prevBest = bestEpley1RMInWindow(sessions, exerciseId, prevStart, prevEnd);
       const allBest = allTimeBestEpley1RM(sessions, exerciseId);
+      const liftSessionCount = countSessionsWithLiftData(sessions, exerciseId);
       const delta = thisBest - prevBest;
       let changeTone: 'success' | 'muted' | 'danger' = 'muted';
       if (delta > 0) changeTone = 'success';
@@ -95,11 +163,18 @@ export default function ProgressScreen() {
         changeText: `${formatSignedKg(delta)}kg`,
         changeTone,
         barPct,
+        liftSessionCount,
       };
     });
 
     const volumeRows = volumeRowsForUi(sessions, thisStart, thisEnd);
     const maxVol = Math.max(1, ...volumeRows.map((r) => r.sets));
+
+    const charts = BENCHMARK_LIFT_DEFS.map(({ label, exerciseId }) => ({
+      label,
+      exerciseId,
+      series: weightProgressionSeries(sessions, exerciseId, 10),
+    })).filter((c) => c.series.length >= 2);
 
     return {
       thisOverall,
@@ -109,167 +184,252 @@ export default function ProgressScreen() {
       benchmarks,
       volumeRows,
       maxVol,
+      charts,
     };
   }, [sessions]);
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+      <div className="flex flex-col gap-6 px-6 pb-32 pt-8">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">Progress</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
         </header>
-        <p className="text-sm text-text-secondary">Loading…</p>
+        <p className="text-sm text-[#6B7280]">{t('loading')}</p>
       </div>
     );
   }
 
   if (!metrics) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+      <div className="flex flex-col gap-6 px-6 pb-32 pt-8">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-text-primary">Progress</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
+          <p className="mt-1 font-medium tracking-tight text-[#6B7280]">{t('yourProgressOverTime')}</p>
         </header>
-        <Card className="border-border bg-card py-10 text-center">
-          <p className="text-sm font-medium leading-relaxed text-text-secondary">
-            Complete your first workout to see progress
+        <Card className="border-[#2A2A2A] bg-[#1C1C1C] py-10 text-center">
+          <p className="text-sm font-medium leading-relaxed text-[#6B7280]">
+            {t('completeFirstWorkoutToSeeProgress')}
           </p>
         </Card>
       </div>
     );
   }
 
-  const { thisOverall, overallPct, splits, benchmarks, volumeRows, maxVol } = metrics;
+  const { thisOverall, overallPct, splits, benchmarks, volumeRows, maxVol, charts } = metrics;
+  const benchmarksWithData = benchmarks.filter((b) => b.displayKg > 0);
 
   const overallTrendUp = overallPct !== null && overallPct > 0;
   const overallTrendDown = overallPct !== null && overallPct < 0;
   const overallTrendFlat = overallPct !== null && overallPct === 0;
-  const overallTrendClass = overallTrendUp
-    ? 'text-success'
-    : overallTrendDown
-      ? 'text-red-400'
-      : 'text-text-secondary';
 
   const SPLIT_LABEL: Record<SplitKey, string> = {
-    push: 'PUSH',
-    pull: 'PULL',
-    legs: 'LEGS',
+    push: t('push').toUpperCase(),
+    pull: t('pull').toUpperCase(),
+    legs: t('legs').toUpperCase(),
   };
 
-  function splitTrend(split: SplitKey) {
-    const { thisAvg, prevAvg } = splits[split];
-    const d = thisAvg - prevAvg;
-    if (d > 0.5) return { Icon: ArrowUp, className: 'text-success' as const };
-    if (d < -0.5) return { Icon: ArrowDown, className: 'text-red-400' as const };
-    return { Icon: null as null, className: 'text-text-secondary' as const };
-  }
+  const saturationRows = SATURATION_KEYS.map((k) => volumeRows.find((r) => r.key === k)).filter(
+    (r): r is NonNullable<typeof r> => Boolean(r),
+  );
 
   return (
-    <div className="flex flex-col gap-6 px-5 pb-8 pt-8">
+    <div className="animate-in fade-in space-y-12 px-6 pb-32 pt-8 duration-700">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Progress</h1>
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('progress')}</h1>
+        <p className="mt-1 font-medium tracking-tight text-[#6B7280]">{t('yourProgressOverTime')}</p>
       </header>
 
-      {/* Overall strength */}
-      <Card className="border-border bg-card">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-          OVERALL STRENGTH SCORE
-        </p>
-        <div className="mt-1 flex items-baseline gap-3">
-          <span className="font-mono text-5xl font-bold tracking-tighter text-text-primary">{thisOverall}</span>
-          <span className={`flex items-center gap-0.5 text-sm font-bold ${overallTrendClass}`}>
-            {overallPct !== null && overallPct !== 0 ? (
-              <>
-                {overallTrendUp ? <ArrowUp className="h-4 w-4" aria-hidden /> : null}
-                {overallTrendDown ? <ArrowDown className="h-4 w-4" aria-hidden /> : null}
-                {formatPct(overallPct)}
-              </>
-            ) : overallTrendFlat ? (
-              <span>{formatPct(0)}</span>
-            ) : overallPct === null && thisOverall > 0 ? (
-              <>
-                <ArrowUp className="h-4 w-4" aria-hidden />
-                New
-              </>
-            ) : (
-              <span>vs last week</span>
-            )}
-          </span>
+      <section className="relative overflow-hidden rounded-[32px] border border-white/5 bg-[#141414]/80 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.98]">
+        <div className="relative z-10">
+          <div className="mb-2 text-center">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+              {t('currentStrengthIndex')}
+            </h3>
+          </div>
+
+          <div className="text-center">
+            <span className="text-7xl font-black tracking-tighter text-white">{thisOverall}</span>
+          </div>
+
+          <div className="mt-10 grid grid-cols-3 gap-3">
+            {(['push', 'pull', 'legs'] as const).map((key) => {
+              const thisAvg = splits[key].thisAvg;
+              const noSplitData = thisAvg <= 0;
+              const avg = noSplitData ? null : Math.round(thisAvg);
+              const sp = pctChange(splits[key].thisAvg, splits[key].prevAvg);
+              const showTrendRow = !noSplitData && sp !== null && sp !== 0;
+              const up = showTrendRow && sp > 0;
+              const down = showTrendRow && sp < 0;
+              return (
+                <div
+                  key={key}
+                  className="flex flex-col items-center rounded-2xl border border-white/5 bg-[#050505]/40 p-4 text-center backdrop-blur-md transition-all hover:bg-[#050505]/60"
+                >
+                  <span className="mb-2 block text-[9px] font-black tracking-[0.2em] text-[#6B7280]">
+                    {SPLIT_LABEL[key]}
+                  </span>
+                  <span className="block text-lg font-black tracking-tighter text-white">
+                    {noSplitData ? '—' : avg}
+                  </span>
+                  {showTrendRow ? (
+                    <div
+                      className={`mt-2 flex items-center justify-center gap-1 text-[9px] font-black uppercase tracking-tight ${
+                        up ? 'text-[#22C55E]' : down ? 'text-[#EF4444]' : 'text-[#6B7280]'
+                      }`}
+                    >
+                      {up ? <ArrowUpRight className="h-2.5 w-2.5" /> : null}
+                      {down ? <TrendingDown className="h-2.5 w-2.5" /> : null}
+                      {formatPct(sp)}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          {(['push', 'pull', 'legs'] as const).map((key) => {
-            const avg = Math.round(splits[key].thisAvg);
-            const { Icon, className } = splitTrend(key);
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#8B5CF6]/5 blur-[80px]"
+          aria-hidden
+        />
+      </section>
+
+      {benchmarksWithData.length > 0 ? (
+        <section className="space-y-6">
+          <div>
+            <h3 className="text-left text-sm font-black uppercase tracking-widest text-[#6B7280]">
+              {t('benchmarkLifts')}
+            </h3>
+          </div>
+          <div className="flex flex-col gap-10">
+            {benchmarksWithData.map((lift) => {
+              const showDeltaBadge =
+                lift.liftSessionCount >= 2 &&
+                lift.changeTone === 'success' &&
+                lift.changeText !== '+0kg';
+              const showRegressionBadge =
+                lift.liftSessionCount >= 2 &&
+                lift.changeTone === 'danger' &&
+                lift.changeText !== '+0kg';
+              return (
+                <div key={lift.exerciseId} className="group">
+                  <span className="mb-2 block text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                    {lift.label}
+                  </span>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-baseline gap-1">
+                      <span className="text-4xl font-black tabular-nums tracking-tighter text-white">
+                        {lift.displayKg}
+                      </span>
+                      <span className="text-sm text-[#6B7280]">{t('kgUnit')}</span>
+                    </div>
+                    {showDeltaBadge ? (
+                      <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/10 px-2 py-1">
+                        <TrendingUp className="h-3 w-3 text-[#22C55E]" aria-hidden />
+                        <span className="text-[10px] font-black text-[#22C55E]">{lift.changeText}</span>
+                      </div>
+                    ) : null}
+                    {showRegressionBadge ? (
+                      <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#EF4444]/20 bg-[#EF4444]/10 px-2 py-1">
+                        <TrendingDown className="h-3 w-3 text-[#EF4444]" aria-hidden />
+                        <span className="text-[10px] font-black text-[#EF4444]">{lift.changeText}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-4 h-[1.5px] w-full overflow-hidden rounded-full bg-[#111111]">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${lift.barPct}%` }}
+                      transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1] }}
+                      className="h-[1.5px] rounded-full bg-gradient-to-r from-[#8B5CF6]/40 to-[#8B5CF6] shadow-[0_0_12px_rgba(139,92,246,0.35)]"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="space-y-6 pt-4">
+        <h3 className="px-2 text-center text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+          {t('weeklySaturation')}
+        </h3>
+        <div className="grid grid-cols-2 gap-4">
+          {saturationRows.map((v) => {
+            const fillPct = maxVol > 0 ? Math.min(100, Math.round((v.sets / maxVol) * 100)) : 0;
             return (
-              <div key={key} className="rounded-lg border border-border bg-surface p-2 text-center">
-                <p className="text-[8px] font-bold uppercase tracking-wide text-text-secondary">{SPLIT_LABEL[key]}</p>
-                <p className={`mt-1 flex items-center justify-center gap-0.5 text-xs font-bold ${className}`}>
-                  {avg}
-                  {Icon ? <Icon className="h-3 w-3" aria-hidden /> : null}
-                </p>
+              <div
+                key={v.key}
+                className="relative overflow-hidden rounded-3xl border border-[#222222] bg-[#111111] p-5"
+              >
+                <div className="relative z-10 flex flex-col items-center">
+                  <span className="mb-2 text-[9px] font-black tracking-widest text-[#6B7280]">{v.label}</span>
+                  <span className="text-2xl font-black tracking-tight text-white">{fillPct}%</span>
+                  <span className="mt-1 text-[9px] font-bold uppercase text-[#6B7280]">
+                    {v.sets} / {maxVol} {t('setsUnit')}
+                  </span>
+                </div>
+                <div className="absolute inset-0 z-0">
+                  <motion.div
+                    initial={{ height: 0 }}
+                    animate={{ height: `${fillPct}%` }}
+                    transition={{ duration: 1, delay: 0.2 }}
+                    className={`absolute bottom-0 left-0 right-0 opacity-20 ${
+                      v.sets >= maxVol && maxVol > 0 ? 'bg-[#8B5CF6]' : 'bg-[#6B7280]'
+                    }`}
+                  />
+                </div>
               </div>
             );
           })}
         </div>
-      </Card>
+      </section>
 
-      {/* Benchmark lifts */}
-      <section>
-        <h2 className="mb-4 px-1 text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-          BENCHMARK LIFTS (EST. 1RM)
-        </h2>
-        <div className="flex flex-col gap-3">
-          {benchmarks.map((lift) => (
-            <Card key={lift.exerciseId} className="relative overflow-hidden border-border">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold tracking-tight text-text-primary">{lift.label}</p>
-                  <p
-                    className={`mt-1 text-[10px] font-bold uppercase tracking-tight ${
-                      lift.changeTone === 'success'
-                        ? 'text-success'
-                        : lift.changeTone === 'danger'
-                          ? 'text-red-400'
-                          : 'text-text-secondary'
-                    }`}
-                  >
-                    {lift.changeText}
-                  </p>
+      {charts.length > 0 ? (
+        <section className="space-y-6">
+          <h3 className="text-left text-sm font-black uppercase tracking-widest text-[#6B7280]">
+            {t('progressionTrend')}
+          </h3>
+          <div className="flex flex-col gap-6">
+            {charts.map((c) => {
+              const first = c.series[0].weight;
+              const last = c.series[c.series.length - 1].weight;
+              const delta = last - first;
+              const tone =
+                delta > 0 ? 'text-[#22C55E]' : delta < 0 ? 'text-[#EF4444]' : 'text-[#6B7280]';
+              const data = c.series.map((p) => ({
+                label: new Date(p.ts).toLocaleDateString(locale, { day: 'numeric', month: 'short' }),
+                weight: p.weight,
+              }));
+              return (
+                <div
+                  key={c.exerciseId}
+                  className="overflow-hidden rounded-3xl border border-[#222222] bg-[#111111] p-5"
+                >
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                      {c.label}
+                    </span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-black tabular-nums tracking-tight text-white">
+                        {formatChartWeight(last)}
+                        {t('kgUnit')}
+                      </span>
+                      {delta !== 0 ? (
+                        <span className={`text-[11px] font-black tabular-nums ${tone}`}>
+                          {formatSignedKg(delta)}
+                          {t('kgUnit')}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <ProgressionChart data={data} />
                 </div>
-                <span className="shrink-0 font-mono text-lg font-bold text-text-primary">{lift.displayKg}kg</span>
-              </div>
-              <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-surface">
-                <div
-                  className="h-full rounded-full bg-violet-500 transition-all"
-                  style={{ width: `${lift.barPct}%` }}
-                />
-              </div>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      {/* Weekly volume */}
-      <section className="mb-4">
-        <h2 className="mb-4 px-1 text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-          WEEKLY VOLUME
-        </h2>
-        <Card className="flex flex-col gap-4 border-border">
-          {volumeRows.map((row) => (
-            <div key={row.key} className="space-y-1">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="font-bold uppercase text-text-secondary">{row.label}</span>
-                <span className="font-mono text-text-primary">{row.sets} SETS</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-surface">
-                <div
-                  className="h-full rounded-full bg-accent transition-all"
-                  style={{ width: `${(row.sets / maxVol) * 100}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </Card>
-      </section>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

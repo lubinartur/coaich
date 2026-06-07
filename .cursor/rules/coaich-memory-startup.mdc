@@ -1,0 +1,10 @@
+---
+description: Load CoAIch memory context at session start
+alwaysApply: true
+---
+
+# CoAIch Memory Startup
+
+- At the start of every new session, before exploration, edits, or substantive answers, call `active_context` on the `user-coaich-memory` MCP server with `project: "coaich"`.
+- Treat the returned active and blocked items as required session context for the rest of the conversation.
+- If the memory server is unavailable, say that startup context could not be loaded, then continue normally.

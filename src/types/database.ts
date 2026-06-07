@@ -41,6 +41,8 @@ export interface Profile {
   benchPress10RM?: number;
   squat10RM?: number;
   deadlift10RM?: number;
+  /** Rotation pattern used by the coach. Defaults to `'ppl'` when missing. */
+  splitType?: 'ppl' | 'upper_lower' | 'full_body';
 }
 
 export interface Exercise {

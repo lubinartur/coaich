@@ -1,78 +1,72 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, X } from 'lucide-react';
-import { Button, Card } from '@/components/ui';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import { ChevronRight, Download, Globe, LoaderCircle, Shield, Sliders, Upload, User, X } from 'lucide-react';
+import { Button } from '@/components/ui';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
+import { exportAllData, importAllData } from '@/services/dataExport';
 import type { Profile } from '@/types';
+import type { TranslationKey } from '@/i18n/translations';
 
-const INJURY_LABEL: Record<string, string> = {
-  knees: 'KNEES',
-  lower_back: 'LOWER BACK',
-  back: 'BACK',
-  shoulders: 'SHOULDERS',
-  wrists: 'WRISTS',
-  hips: 'HIPS',
-};
+const INJURY_OPTIONS = ['knees', 'back', 'shoulders', 'wrists', 'hips'] as const;
 
-const INJURY_OPTIONS: { id: string; label: string }[] = [
-  { id: 'knees', label: 'Knees' },
-  { id: 'back', label: 'Back' },
-  { id: 'shoulders', label: 'Shoulders' },
-  { id: 'wrists', label: 'Wrists' },
-  { id: 'hips', label: 'Hips' },
-];
+const GOAL_OPTIONS = ['muscle', 'strength', 'weight_loss', 'health'] as const satisfies readonly Profile['goal'][];
 
-const GOAL_OPTIONS: { value: Profile['goal']; label: string }[] = [
-  { value: 'muscle', label: 'Muscle' },
-  { value: 'strength', label: 'Strength' },
-  { value: 'weight_loss', label: 'Weight loss' },
-  { value: 'health', label: 'Health' },
-];
+const EXPERIENCE_OPTIONS =
+  ['beginner', 'intermediate', 'advanced'] as const satisfies readonly Profile['experience'][];
 
-const EXPERIENCE_OPTIONS: { value: Profile['experience']; label: string }[] = [
-  { value: 'beginner', label: 'Beginner' },
-  { value: 'intermediate', label: 'Intermediate' },
-  { value: 'advanced', label: 'Advanced' },
-];
-
-const TRAINING_ENVIRONMENT_OPTIONS: { value: Profile['trainingEnvironment']; label: string }[] = [
-  { value: 'gym', label: 'Gym' },
-  { value: 'home', label: 'Home' },
-  { value: 'bodyweight', label: 'Bodyweight only' },
-];
+const TRAINING_ENVIRONMENT_OPTIONS =
+  ['gym', 'home', 'bodyweight'] as const satisfies readonly Profile['trainingEnvironment'][];
 
 const REST_PRESETS = [60, 90, 120, 180] as const;
 
-function formatGoal(goal: Profile['goal']): string {
-  const m: Record<Profile['goal'], string> = {
-    muscle: 'MUSCLE',
-    strength: 'STRENGTH',
-    weight_loss: 'WEIGHT LOSS',
-    health: 'HEALTH',
+function formatGoal(goal: Profile['goal'], t: (key: TranslationKey) => string): string {
+  const m: Record<Profile['goal'], TranslationKey> = {
+    muscle: 'muscle',
+    strength: 'strengthGoal',
+    weight_loss: 'weightLoss',
+    health: 'health',
   };
-  return m[goal];
+  return t(m[goal]).toUpperCase();
 }
 
-function formatExperience(exp: Profile['experience']): string {
-  const m: Record<Profile['experience'], string> = {
-    beginner: 'BEGINNER',
-    intermediate: 'INTERMEDIATE',
-    advanced: 'ADVANCED',
+function formatExperience(exp: Profile['experience'], t: (key: TranslationKey) => string): string {
+  const m: Record<Profile['experience'], TranslationKey> = {
+    beginner: 'beginner',
+    intermediate: 'intermediate',
+    advanced: 'advancedLevel',
   };
-  return m[exp];
+  return t(m[exp]).toUpperCase();
 }
 
-function formatTrainingEnvironment(env: Profile['trainingEnvironment']): string {
-  const m: Record<Profile['trainingEnvironment'], string> = {
-    gym: 'GYM',
-    home: 'HOME',
-    bodyweight: 'BODYWEIGHT ONLY',
+function formatTrainingEnvironment(
+  env: Profile['trainingEnvironment'],
+  t: (key: TranslationKey) => string,
+): string {
+  const m: Record<Profile['trainingEnvironment'], TranslationKey> = {
+    gym: 'gym',
+    home: 'home',
+    bodyweight: 'bodyweightOnly',
   };
-  return m[env];
+  return t(m[env]).toUpperCase();
 }
 
-function formatInjuries(injuries: string[]): string {
-  if (!injuries.length) return 'NONE';
-  return injuries.map((id) => INJURY_LABEL[id] ?? id.toUpperCase()).join(', ');
+function injuryLabel(id: string, t: (key: TranslationKey) => string): string {
+  const m: Record<string, TranslationKey> = {
+    knees: 'knees',
+    lower_back: 'backArea',
+    back: 'backArea',
+    shoulders: 'shouldersArea',
+    wrists: 'wrists',
+    hips: 'hips',
+  };
+  const key = m[id];
+  return key ? t(key) : id;
+}
+
+function formatInjuries(injuries: string[], t: (key: TranslationKey) => string): string {
+  if (!injuries.length) return t('none').toUpperCase();
+  return injuries.map((id) => injuryLabel(id, t).toUpperCase()).join(', ');
 }
 
 type SheetId =
@@ -86,53 +80,47 @@ type SheetId =
   | 'gender'
   | 'age'
   | 'weight'
-  | 'height';
+  | 'height'
+  | 'splitType';
 
-function sheetTitle(id: NonNullable<SheetId>): string {
-  const titles: Record<NonNullable<SheetId>, string> = {
-    goal: 'Goal',
-    experience: 'Experience',
-    trainingEnvironment: 'Training environment',
-    restTimer: 'Rest timer',
-    pharmacology: 'Pharmacology',
-    injuries: 'Injuries',
-    gender: 'Gender',
-    age: 'Age',
-    weight: 'Weight (kg)',
-    height: 'Height (cm)',
+const SPLIT_OPTIONS = ['ppl', 'upper_lower', 'full_body'] as const satisfies
+  readonly NonNullable<Profile['splitType']>[];
+
+function formatSplitType(
+  split: NonNullable<Profile['splitType']>,
+  t: (key: TranslationKey) => string,
+): string {
+  const m: Record<NonNullable<Profile['splitType']>, TranslationKey> = {
+    ppl: 'splitPPL',
+    upper_lower: 'splitUpperLower',
+    full_body: 'splitFullBody',
   };
-  return titles[id];
+  return t(m[split]);
 }
 
-function SettingsRow({
-  label,
-  value,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  onPress: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onPress}
-      className="flex w-full items-center justify-between gap-3 border-b border-border/40 py-3.5 text-left last:border-0 active:bg-surface/50"
-    >
-      <span className="text-sm font-medium text-text-primary">{label}</span>
-      <div className="flex min-w-0 max-w-[55%] items-center justify-end gap-2">
-        <span className="truncate text-right text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          {value}
-        </span>
-        <ChevronRight className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
-      </div>
-    </button>
-  );
+function sheetTitle(id: NonNullable<SheetId>, t: (key: TranslationKey) => string): string {
+  const titles: Record<NonNullable<SheetId>, TranslationKey> = {
+    goal: 'goal',
+    experience: 'experience',
+    trainingEnvironment: 'trainingEnvironment',
+    restTimer: 'restTimer',
+    pharmacology: 'pharmacology',
+    injuries: 'injuries',
+    gender: 'gender',
+    age: 'age',
+    weight: 'weightKg',
+    height: 'heightCm',
+    splitType: 'splitType',
+  };
+  return t(titles[id]);
 }
 
-function SectionLabel({ children }: { children: string }) {
+function SectionLabel({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
   return (
-    <h2 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-widest text-text-secondary">{children}</h2>
+    <div className="mb-3 flex items-center gap-2 pl-2 text-[10px] font-bold uppercase tracking-widest text-[#6B7280]">
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      {children}
+    </div>
   );
 }
 
@@ -141,9 +129,13 @@ export interface SettingsScreenProps {
 }
 
 export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [sheet, setSheet] = useState<SheetId>(null);
+  const [advancedFeedback, setAdvancedFeedback] = useState<string | null>(null);
+  const [importingData, setImportingData] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   /** Draft state for sheets */
   const [pharmaMode, setPharmaMode] = useState<Profile['pharmacology']>('natural');
@@ -180,13 +172,19 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     if (sheet === 'height') setTextDraft(String(profile.height));
   }, [sheet, profile]);
 
+  useEffect(() => {
+    if (!advancedFeedback) return undefined;
+    const timeout = window.setTimeout(() => setAdvancedFeedback(null), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [advancedFeedback]);
+
   const closeSheet = () => setSheet(null);
 
   const toggleLanguage = async () => {
     if (!profile) return;
     const next: Profile['language'] = profile.language === 'en' ? 'ru' : 'en';
     await db.profile.update(1, { language: next });
-    await reloadProfile();
+    window.location.reload();
   };
 
   const applyGoal = async (goal: Profile['goal']) => {
@@ -251,6 +249,12 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     closeSheet();
   };
 
+  const applySplitType = async (splitType: NonNullable<Profile['splitType']>) => {
+    await db.profile.update(1, { splitType });
+    await reloadProfile();
+    closeSheet();
+  };
+
   const saveNumericField = async (field: 'age' | 'weight' | 'height') => {
     if (!profile) return;
     const raw = textDraft.trim().replace(',', '.');
@@ -264,27 +268,61 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     closeSheet();
   };
 
+  const handleExportData = async () => {
+    try {
+      await exportAllData();
+      setAdvancedFeedback(t('exported'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('exportFailed');
+      setAdvancedFeedback(message);
+    }
+  };
+
+  const handleImportClick = () => {
+    if (importingData) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImportingData(true);
+    setAdvancedFeedback(null);
+    try {
+      await importAllData(file);
+      setAdvancedFeedback(t('imported'));
+      window.setTimeout(() => window.location.reload(), 600);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('importFailed');
+      setAdvancedFeedback(message);
+    } finally {
+      setImportingData(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-12 pt-8">
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Settings</h1>
-        <p className="text-sm text-text-secondary">Loading…</p>
+      <div className="flex flex-col gap-6 bg-transparent px-6 pb-24 pt-8">
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('settings')}</h1>
+        <p className="text-sm text-[#6B7280]">{t('loading')}</p>
       </div>
     );
   }
 
   if (!profile) {
     return (
-      <div className="flex flex-col gap-6 px-5 pb-12 pt-8">
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Settings</h1>
-        <p className="text-sm text-text-secondary">No profile found. Complete onboarding first.</p>
+      <div className="flex flex-col gap-6 bg-transparent px-6 pb-24 pt-8">
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('settings')}</h1>
+        <p className="text-sm text-[#6B7280]">{t('noProfileFound')}</p>
       </div>
     );
   }
 
-  const langLabel = profile.language === 'en' ? 'ENGLISH' : 'RUSSIAN';
-  const genderLabel = profile.gender === 'male' ? 'MALE' : 'FEMALE';
-  const pharmaLabel = profile.pharmacology === 'natural' ? 'NATURAL' : 'ON CYCLE';
+  const langLabel = profile.language === 'en' ? t('english').toUpperCase() : t('russian').toUpperCase();
+  const genderLabel = profile.gender === 'male' ? t('male').toUpperCase() : t('female').toUpperCase();
+  const pharmaLabel =
+    profile.pharmacology === 'natural' ? t('natural').toUpperCase() : t('onCycle').toUpperCase();
 
   const optionBtn = (active: boolean) =>
     `w-full rounded-xl border px-4 py-3 text-left text-sm font-semibold transition-colors ${
@@ -294,9 +332,9 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
     }`;
 
   return (
-    <div className="flex flex-col gap-6 px-5 pb-12 pt-8">
+    <div className="animate-in fade-in flex flex-col gap-8 bg-transparent px-6 pb-24 pt-8 duration-500">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary">Settings</h1>
+        <h1 className="text-4xl font-black tracking-tighter text-white">{t('settings')}</h1>
       </header>
 
       {sheet ? (
@@ -314,13 +352,13 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
           >
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-4 py-3">
               <h2 id="settings-sheet-title" className="text-base font-bold text-text-primary">
-                {sheetTitle(sheet)}
+                {sheetTitle(sheet, t)}
               </h2>
               <button
                 type="button"
                 onClick={closeSheet}
                 className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors hover:bg-surface hover:text-text-primary"
-                aria-label="Close"
+                aria-label={t('close')}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -330,42 +368,42 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
               {sheet === 'goal' &&
                 GOAL_OPTIONS.map((o) => (
                   <button
-                    key={o.value}
+                    key={o}
                     type="button"
-                    className={optionBtn(profile.goal === o.value)}
-                    onClick={() => void applyGoal(o.value)}
+                    className={optionBtn(profile.goal === o)}
+                    onClick={() => void applyGoal(o)}
                   >
-                    {o.label}
+                    {formatGoal(o, t)}
                   </button>
                 ))}
 
               {sheet === 'experience' &&
                 EXPERIENCE_OPTIONS.map((o) => (
                   <button
-                    key={o.value}
+                    key={o}
                     type="button"
-                    className={optionBtn(profile.experience === o.value)}
-                    onClick={() => void applyExperience(o.value)}
+                    className={optionBtn(profile.experience === o)}
+                    onClick={() => void applyExperience(o)}
                   >
-                    {o.label}
+                    {formatExperience(o, t)}
                   </button>
                 ))}
 
               {sheet === 'trainingEnvironment' &&
                 TRAINING_ENVIRONMENT_OPTIONS.map((o) => (
                   <button
-                    key={o.value}
+                    key={o}
                     type="button"
-                    className={optionBtn(profile.trainingEnvironment === o.value)}
-                    onClick={() => void applyTrainingEnvironment(o.value)}
+                    className={optionBtn(profile.trainingEnvironment === o)}
+                    onClick={() => void applyTrainingEnvironment(o)}
                   >
-                    {o.label}
+                    {formatTrainingEnvironment(o, t)}
                   </button>
                 ))}
 
               {sheet === 'restTimer' && (
                 <>
-                  <p className="text-xs text-text-secondary">Presets (seconds)</p>
+                  <p className="text-xs text-text-secondary">{t('presetsSeconds')}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {REST_PRESETS.map((sec) => (
                       <button
@@ -388,19 +426,19 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
                     className={optionBtn(pharmaMode === 'natural')}
                     onClick={() => setPharmaMode('natural')}
                   >
-                    Natural
+                    {t('natural')}
                   </button>
                   <button
                     type="button"
                     className={optionBtn(pharmaMode === 'on_cycle')}
                     onClick={() => setPharmaMode('on_cycle')}
                   >
-                    On cycle
+                    {t('onCycle')}
                   </button>
                   {pharmaMode === 'on_cycle' ? (
                     <label className="mt-2 block">
                       <span className="mb-1.5 block text-xs font-medium text-text-secondary">
-                        Cycle start date
+                        {t('cycleStartDate')}
                       </span>
                       <input
                         type="date"
@@ -411,7 +449,7 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
                     </label>
                   ) : null}
                   <Button type="button" variant="primary" size="lg" fullWidth onClick={() => void applyPharmacology()}>
-                    Save
+                    {t('save')}
                   </Button>
                 </>
               )}
@@ -423,23 +461,35 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
                     className={optionBtn(injuryDraft.length === 0)}
                     onClick={() => setInjuryDraft([])}
                   >
-                    None
+                    {t('none')}
                   </button>
                   {INJURY_OPTIONS.map((o) => (
                     <button
-                      key={o.id}
+                      key={o}
                       type="button"
-                      className={optionBtn(injuryDraft.includes(o.id))}
-                      onClick={() => toggleInjuryOption(o.id)}
+                      className={optionBtn(injuryDraft.includes(o))}
+                      onClick={() => toggleInjuryOption(o)}
                     >
-                      {o.label}
+                      {injuryLabel(o, t)}
                     </button>
                   ))}
                   <Button type="button" variant="primary" size="lg" fullWidth onClick={() => void saveInjuries()}>
-                    Save
+                    {t('save')}
                   </Button>
                 </>
               )}
+
+              {sheet === 'splitType' &&
+                SPLIT_OPTIONS.map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    className={optionBtn((profile.splitType ?? 'ppl') === o)}
+                    onClick={() => void applySplitType(o)}
+                  >
+                    {formatSplitType(o, t)}
+                  </button>
+                ))}
 
               {sheet === 'gender' && (
                 <>
@@ -448,14 +498,14 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
                     className={optionBtn(profile.gender === 'male')}
                     onClick={() => void applyGender('male')}
                   >
-                    Male
+                    {t('male')}
                   </button>
                   <button
                     type="button"
                     className={optionBtn(profile.gender === 'female')}
                     onClick={() => void applyGender('female')}
                   >
-                    Female
+                    {t('female')}
                   </button>
                 </>
               )}
@@ -477,7 +527,7 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
                     fullWidth
                     onClick={() => void saveNumericField(sheet)}
                   >
-                    Save
+                    {t('save')}
                   </Button>
                 </>
               )}
@@ -487,90 +537,246 @@ export default function SettingsScreen({ onOpenImport }: SettingsScreenProps) {
       ) : null}
 
       <section>
-        <SectionLabel>GENERAL</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Language" value={langLabel} onPress={() => void toggleLanguage()} />
+        <SectionLabel icon={Globe}>{t('general')}</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <button
+            type="button"
+            onClick={() => void toggleLanguage()}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('language')}</span>
+            <span className="text-sm font-bold text-[#8B5CF6]">{langLabel}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('splitType')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('splitType')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">
+                {formatSplitType(profile.splitType ?? 'ppl', t)}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <div className="flex w-full items-center justify-between p-4">
+            <span className="text-sm text-white">{t('units')}</span>
+            <span className="text-sm font-bold text-[#8B5CF6]">{t('metricKg')}</span>
           </div>
-        </Card>
+        </div>
       </section>
 
       <section>
-        <SectionLabel>PROFILE</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Gender" value={genderLabel} onPress={() => setSheet('gender')} />
-            <SettingsRow label="Age" value={String(profile.age)} onPress={() => setSheet('age')} />
-            <SettingsRow label="Weight" value={`${profile.weight} KG`} onPress={() => setSheet('weight')} />
-            <SettingsRow label="Height" value={`${profile.height} CM`} onPress={() => setSheet('height')} />
+        <SectionLabel icon={User}>{t('profile')}</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <div className="grid grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setSheet('gender')}
+              className="border-b border-r border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">{t('gender').toUpperCase()}</span>
+              <span className="text-sm font-bold text-white">{genderLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('age')}
+              className="border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">{t('age').toUpperCase()}</span>
+              <span className="text-sm font-bold text-white">{profile.age}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('weight')}
+              className="border-r border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">{t('weight').toUpperCase()}</span>
+              <span className="text-sm font-bold text-white">
+                {profile.weight}
+                {t('kgUnit')}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('height')}
+              className="p-4 text-left transition-colors hover:bg-white/[0.02]"
+            >
+              <span className="block text-[10px] font-bold text-[#6B7280]">{t('heightCm').toUpperCase()}</span>
+              <span className="text-sm font-bold text-white">
+                {profile.height}
+                {t('cmUnit')}
+              </span>
+            </button>
           </div>
-        </Card>
+          <button
+            type="button"
+            onClick={() => setSheet('trainingEnvironment')}
+            className="flex w-full items-center justify-between border-t border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('trainingEnvironment')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">
+                {formatTrainingEnvironment(profile.trainingEnvironment, t)}
+              </span>
+              <ChevronRight className="h-4 w-4 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('injuries')}
+            className="flex w-full items-center justify-between border-t border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('injuries')}</span>
+            <div className="flex items-center gap-2">
+              <span className="max-w-[55%] truncate text-right text-sm font-bold text-[#8B5CF6]">
+                {formatInjuries(profile.injuries, t)}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+        </div>
       </section>
 
       <section>
-        <SectionLabel>PREFERENCES</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Goal" value={formatGoal(profile.goal)} onPress={() => setSheet('goal')} />
-            <SettingsRow
-              label="Experience"
-              value={formatExperience(profile.experience)}
-              onPress={() => setSheet('experience')}
+        <SectionLabel icon={Sliders}>{t('preferences')}</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <button
+            type="button"
+            onClick={() => setSheet('goal')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('goal')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">{formatGoal(profile.goal, t)}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('experience')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('experience')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">{formatExperience(profile.experience, t)}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSheet('restTimer')}
+            className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('restTimer')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#8B5CF6]">
+                {profile.restTimer}
+                {t('secShort')}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel icon={Shield}>{t('advanced')}</SectionLabel>
+        <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#1C1C1C]">
+          <button
+            type="button"
+            onClick={() => setSheet('pharmacology')}
+            className="flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <span className="text-sm text-white">{t('pharmacology')}</span>
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-sm font-bold ${
+                  profile.pharmacology === 'on_cycle' ? 'text-[#EF4444]' : 'text-[#22C55E]'
+                }`}
+              >
+                {pharmaLabel}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+            </div>
+          </button>
+          {profile.pharmacology === 'on_cycle' && (
+            <div className="border-b border-[#2A2A2A] px-4 pb-4 pt-3">
+              {profile.cycleCompound ? (
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[#6B7280]">
+                  {t('compound')}{' '}
+                  <span className="font-semibold normal-case text-white">{profile.cycleCompound}</span>
+                </p>
+              ) : null}
+              {profile.cycleStartDate ? (
+                <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-[#6B7280]">
+                  {t('startDate')}{' '}
+                  <span className="font-mono font-semibold normal-case text-white">{profile.cycleStartDate}</span>
+                </p>
+              ) : null}
+              {!profile.cycleCompound && !profile.cycleStartDate ? (
+                <p className="text-xs text-[#6B7280]">{t('noCycleDetailsSaved')}</p>
+              ) : null}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => onOpenImport?.()}
+            className="group flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3">
+              <Download className="h-4 w-4 text-[#6B7280]" aria-hidden />
+              <span className="text-sm text-white">{t('importPastWorkouts')}</span>
+            </div>
+            <ChevronRight
+              className="h-[18px] w-[18px] text-[#2A2A2A] transition-colors group-hover:text-[#8B5CF6]"
+              aria-hidden
             />
-            <SettingsRow
-              label="Training Environment"
-              value={formatTrainingEnvironment(profile.trainingEnvironment)}
-              onPress={() => setSheet('trainingEnvironment')}
-            />
-            <SettingsRow label="Injuries" value={formatInjuries(profile.injuries)} onPress={() => setSheet('injuries')} />
-            <SettingsRow label="Rest Timer" value={`${profile.restTimer}S`} onPress={() => setSheet('restTimer')} />
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionLabel>DATA</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow
-              label="Import past workouts"
-              value="OPEN"
-              onPress={() => {
-                onOpenImport?.();
-              }}
-            />
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionLabel>ADVANCED</SectionLabel>
-        <Card padded={false} className="overflow-hidden border-border px-0">
-          <div className="px-4">
-            <SettingsRow label="Pharmacology" value={pharmaLabel} onPress={() => setSheet('pharmacology')} />
-            {profile.pharmacology === 'on_cycle' && (
-              <div className="border-t border-border/40 pb-4 pt-3">
-                {profile.cycleCompound ? (
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-text-secondary">
-                    Compound{' '}
-                    <span className="font-semibold normal-case text-text-primary">{profile.cycleCompound}</span>
-                  </p>
-                ) : null}
-                {profile.cycleStartDate ? (
-                  <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-text-secondary">
-                    Start date{' '}
-                    <span className="font-mono font-semibold normal-case text-text-primary">
-                      {profile.cycleStartDate}
-                    </span>
-                  </p>
-                ) : null}
-                {!profile.cycleCompound && !profile.cycleStartDate ? (
-                  <p className="text-xs text-text-secondary">No cycle details saved.</p>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </Card>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExportData()}
+            className="group flex w-full items-center justify-between border-b border-[#2A2A2A] p-4 text-left transition-colors hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3">
+              <Download className="h-4 w-4 text-[#6B7280]" aria-hidden />
+              <span className="text-sm text-white">{t('exportData')}</span>
+            </div>
+            <span className="text-sm font-bold text-[#8B5CF6]">
+              {advancedFeedback === t('exported') ? t('exported') : ''}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={handleImportClick}
+            disabled={importingData}
+            className="group flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-white/[0.02] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <div className="flex items-center gap-3">
+              {importingData ? (
+                <LoaderCircle className="h-4 w-4 animate-spin text-[#8B5CF6]" aria-hidden />
+              ) : (
+                <Upload className="h-4 w-4 text-[#6B7280]" aria-hidden />
+              )}
+              <span className="text-sm text-white">{t('importData')}</span>
+            </div>
+            <span
+              className={`text-sm font-bold ${
+                advancedFeedback && advancedFeedback !== t('exported') ? 'text-[#8B5CF6]' : 'text-[#6B7280]'
+              }`}
+            >
+              {importingData ? t('importing') : advancedFeedback && advancedFeedback !== t('exported') ? advancedFeedback : ''}
+            </span>
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(e) => void handleImportFile(e)}
+        />
       </section>
     </div>
   );

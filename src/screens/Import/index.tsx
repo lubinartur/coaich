@@ -7,25 +7,19 @@ import {
   type WorkoutProgramTemplateKey,
 } from '@/constants/workoutPrograms';
 import ExercisePicker from '@/screens/Logger/ExercisePicker';
+import { useTranslation } from '@/hooks/useTranslation';
+import type { TranslationKey } from '@/i18n/translations';
 import { db } from '@/services/db';
 import { canonicalExerciseId, isPlankExerciseName } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, SetLog, WorkoutSession, WorkoutType } from '@/types';
 
-const PROGRAM_CARDS: { key: WorkoutProgramTemplateKey; label: string; emoji: string }[] = [
-  { key: 'push', label: 'Push', emoji: '🔥' },
-  { key: 'pull', label: 'Pull', emoji: '🧗' },
-  { key: 'legs', label: 'Legs', emoji: '🦵' },
-  { key: 'full_body', label: 'Full Body', emoji: '🏋️' },
-  { key: 'custom', label: 'Custom', emoji: '✨' },
+const PROGRAM_CARD_KEYS: { key: WorkoutProgramTemplateKey; labelKey: TranslationKey; emoji: string }[] = [
+  { key: 'push', labelKey: 'push', emoji: '🔥' },
+  { key: 'pull', labelKey: 'pull', emoji: '🧗' },
+  { key: 'legs', labelKey: 'legs', emoji: '🦵' },
+  { key: 'full_body', labelKey: 'fullBody', emoji: '🏋️' },
+  { key: 'custom', labelKey: 'custom', emoji: '✨' },
 ];
-
-const IMPORT_NAME: Record<WorkoutProgramTemplateKey, string> = {
-  push: 'Push',
-  pull: 'Pull',
-  legs: 'Legs',
-  full_body: 'Full Body',
-  custom: 'Custom',
-};
 
 type ImportSetRow = {
   id: string;
@@ -80,7 +74,8 @@ function importRowFromExercise(ex: Exercise): ImportRow {
 }
 
 function todayDateInputValue(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function templateKeyToWorkoutType(key: WorkoutProgramTemplateKey): WorkoutType {
@@ -144,6 +139,7 @@ export interface ImportScreenProps {
 }
 
 export default function ImportScreen({ onBack }: ImportScreenProps) {
+  const { t, lang, locale } = useTranslation();
   const [workoutDate, setWorkoutDate] = useState(todayDateInputValue);
   const [programKey, setProgramKey] = useState<WorkoutProgramTemplateKey>('pull');
   const [rows, setRows] = useState<ImportRow[]>(() => rowsFromTemplate('pull'));
@@ -213,6 +209,11 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
     setRows((prev) => [...prev, importRowFromExercise(ex)]);
   };
 
+  const removeExerciseRow = (rowIdx: number) => {
+    clearErrorFeedback();
+    setRows((prev) => prev.filter((_, i) => i !== rowIdx));
+  };
+
   const saveWorkout = async (resetAfter: boolean): Promise<boolean> => {
     const exercises: SessionExercise[] = [];
     let totalVolume = 0;
@@ -228,7 +229,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
       console.error('[Import] saveWorkout: no exercises to save after build');
       setFeedback({
         kind: 'error',
-        message: 'Please enter weight and reps for at least one set per exercise',
+        message: t('importErrorEnterSets'),
       });
       return false;
     }
@@ -242,9 +243,17 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
     );
 
     const wt = templateKeyToWorkoutType(programKey);
+    const importedBase: Record<WorkoutProgramTemplateKey, string> = {
+      push: t('push'),
+      pull: t('pull'),
+      legs: t('legs'),
+      full_body: t('fullBody'),
+      custom: t('custom'),
+    };
+    const importedSuffix = lang === 'ru' ? ' (импорт)' : ' (imported)';
     const session: WorkoutSession = {
       id: crypto.randomUUID(),
-      name: `${IMPORT_NAME[programKey]} (imported)`,
+      name: `${importedBase[programKey]}${importedSuffix}`,
       type: wt,
       startedAt,
       finishedAt,
@@ -285,7 +294,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
       console.error('[Import] save workout', err);
       setFeedback({
         kind: 'error',
-        message: 'Could not save workout. Please try again.',
+        message: t('importErrorSaveFailed'),
       });
       return false;
     } finally {
@@ -314,21 +323,21 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
     const details = logRowValidation('handleSave');
     const included = rows.filter((r) => r.included);
     if (included.length === 0) {
-      setFeedback({ kind: 'error', message: 'Please include at least one exercise' });
+      setFeedback({ kind: 'error', message: t('importErrorIncludeExercise') });
       return;
     }
     const invalidIncluded = details.filter((d) => d.included && !d.ok);
     if (invalidIncluded.length > 0) {
       setFeedback({
         kind: 'error',
-        message: 'Please enter weight and reps for at least one set per exercise',
+        message: t('importErrorEnterSets'),
       });
       return;
     }
 
     const ok = await saveWorkout(false);
     if (ok) {
-      setFeedback({ kind: 'success', message: 'Workout saved. Returning…' });
+      setFeedback({ kind: 'success', message: t('importSuccessReturning') });
       window.setTimeout(() => {
         setFeedback(null);
         onBack();
@@ -342,42 +351,43 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
     const details = logRowValidation('handleAddAnother');
     const included = rows.filter((r) => r.included);
     if (included.length === 0) {
-      setFeedback({ kind: 'error', message: 'Please include at least one exercise' });
+      setFeedback({ kind: 'error', message: t('importErrorIncludeExercise') });
       return;
     }
     const invalidIncluded = details.filter((d) => d.included && !d.ok);
     if (invalidIncluded.length > 0) {
       setFeedback({
         kind: 'error',
-        message: 'Please enter weight and reps for at least one set per exercise',
+        message: t('importErrorEnterSets'),
       });
       return;
     }
 
     const ok = await saveWorkout(true);
     if (ok) {
-      setFeedback({ kind: 'success', message: 'Workout saved. You can import another below.' });
+      setFeedback({ kind: 'success', message: t('importSuccessAnother') });
       window.setTimeout(() => setFeedback(null), 4000);
     }
   };
 
   const deleteImported = async (id: string) => {
-    if (!window.confirm('Delete this imported workout?')) return;
+    if (!window.confirm(t('deleteImportedWorkoutConfirm'))) return;
     await db.workoutSessions.delete(id);
     await loadImported();
   };
 
-  const typeLabel = (t: WorkoutType) => {
-    const m: Partial<Record<WorkoutType, string>> = {
-      push: 'Push',
-      pull: 'Pull',
-      legs: 'Legs',
-      full_body: 'Full Body',
-      custom: 'Custom',
-      upper: 'Upper',
-      lower: 'Lower',
+  const workoutTypeLabel = (wt: WorkoutType): string => {
+    const m: Partial<Record<WorkoutType, TranslationKey>> = {
+      push: 'push',
+      pull: 'pull',
+      legs: 'legs',
+      full_body: 'fullBody',
+      custom: 'custom',
+      upper: 'workoutTypeUpper',
+      lower: 'workoutTypeLower',
     };
-    return m[t] ?? t;
+    const key = m[wt];
+    return key ? t(key) : String(wt);
   };
 
   return (
@@ -394,13 +404,13 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             type="button"
             onClick={onBack}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-primary transition-colors active:scale-[0.98]"
-            aria-label="Back"
+            aria-label={t('back')}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 pt-0.5">
-            <h1 className="text-xl font-bold tracking-tight text-text-primary">Import Past Workouts</h1>
-            <p className="mt-1 text-sm text-text-secondary">Add recent workouts so AI knows your starting point</p>
+            <h1 className="text-lg font-bold tracking-tight text-text-primary">{t('importPastWorkouts')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('importSubtitle')}</p>
           </div>
         </div>
       </header>
@@ -408,7 +418,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 pb-40 no-scrollbar">
         <div>
           <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-            When was this workout?
+            {t('whenWasThisWorkout')}
           </label>
           <input
             type="date"
@@ -422,9 +432,9 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
         </div>
 
         <div>
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-secondary">Program type</p>
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('programType')}</p>
           <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
-            {PROGRAM_CARDS.map((p) => (
+            {PROGRAM_CARD_KEYS.map((p) => (
               <Card
                 key={p.key}
                 padded={false}
@@ -442,14 +452,14 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                 <span className="text-2xl" aria-hidden>
                   {p.emoji}
                 </span>
-                <span className="text-xs font-bold uppercase tracking-tight text-text-secondary">{p.label}</span>
+                <span className="text-xs font-bold uppercase tracking-tight text-text-secondary">{t(p.labelKey)}</span>
               </Card>
             ))}
           </div>
         </div>
 
         <div className="space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Exercises</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('exercisesLabel')}</p>
           {rows.map((row, idx) => {
             const isBw = row.equipment === 'bodyweight';
             const isPlank = isPlankExerciseName(row.name);
@@ -464,22 +474,19 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => updateRow(idx, { included: !row.included })}
-                    className={`shrink-0 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                      row.included
-                        ? 'border-accent bg-accent/15 text-accent'
-                        : 'border-border bg-surface text-text-secondary'
-                    }`}
+                    onClick={() => removeExerciseRow(idx)}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-red-500 transition-colors hover:border-red-500/40 hover:text-red-400"
+                    aria-label={`${t('remove')} ${row.name}`}
                   >
-                    {row.included ? 'Included' : 'Excluded'}
+                    <Trash2 className="h-4 w-4 text-red-500" aria-hidden />
                   </button>
                 </div>
                 {row.included ? (
                   <div className="mt-4 flex flex-col gap-2">
                     {row.sets.map((set, setIdx) => (
                       <div key={set.id} className="flex items-center gap-2">
-                        <span className="w-11 shrink-0 text-[10px] font-bold text-text-secondary">
-                          SET {setIdx + 1}
+                        <span className="w-11 shrink-0 text-center text-[10px] font-bold text-text-secondary">
+                          {setIdx + 1}
                         </span>
                         {!isBw ? (
                           <>
@@ -487,7 +494,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
-                              placeholder="kg"
+                              placeholder={t('weightPlaceholderInput')}
                               className={inputClass}
                               value={set.weight}
                               onChange={(e) => updateSet(idx, setIdx, 'weight', e.target.value)}
@@ -500,7 +507,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                           type="text"
                           inputMode="numeric"
                           autoComplete="off"
-                          placeholder={isPlank ? 'sec' : 'reps'}
+                          placeholder={isPlank ? t('secPlaceholderInput') : t('repsPlaceholderInput')}
                           className={`${inputClass} ${isBw ? 'flex-1' : ''}`}
                           value={set.reps}
                           onChange={(e) => updateSet(idx, setIdx, 'reps', e.target.value)}
@@ -511,7 +518,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                           disabled={row.sets.length <= 1}
                           onClick={() => removeSet(idx, setIdx)}
                           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors enabled:hover:border-red-500/40 enabled:hover:text-red-400 disabled:opacity-30"
-                          aria-label="Remove set"
+                          aria-label={t('removeSetAria')}
                         >
                           <Minus className="h-5 w-5" />
                         </button>
@@ -524,7 +531,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
                       onClick={() => addSet(idx)}
                       className="mt-1 w-full border border-border/50 bg-transparent px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-none hover:bg-surface/50 hover:text-text-primary"
                     >
-                      + ADD SET
+                      {t('addSetLabel')}
                     </Button>
                   </div>
                 ) : null}
@@ -541,35 +548,35 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             onClick={() => setPickerOpen(true)}
           >
             <Plus className="h-4 w-4 shrink-0" aria-hidden />
-            + Add Exercise
+            {t('addExercise')}
           </Button>
         </div>
 
         {imported.length > 0 ? (
           <div>
             <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-              Imported workouts
+              {t('importedWorkoutsSectionTitle')}
             </p>
             <div className="flex flex-col gap-2">
               {imported.map((s) => (
                 <Card key={s.id} className="flex items-center justify-between gap-3 border-border">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-text-primary">
-                      {new Date(s.finishedAt).toLocaleDateString('en-GB', {
+                      {new Date(s.finishedAt).toLocaleDateString(locale, {
                         day: 'numeric',
                         month: 'short',
                         year: 'numeric',
                       })}
                     </p>
                     <p className="mt-0.5 text-xs text-text-secondary">
-                      {typeLabel(s.type)} · {s.exercises.length} exercises
+                      {workoutTypeLabel(s.type)} · {t('importedCardExerciseCount').replace('{{count}}', String(s.exercises.length))}
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => void deleteImported(s.id)}
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-text-secondary transition-colors hover:border-red-500/50 hover:text-red-400"
-                    aria-label="Delete imported workout"
+                    aria-label={t('deleteImportedWorkoutAria')}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -590,7 +597,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             disabled={saving}
             onClick={() => void handleSave()}
           >
-            Save Workout
+            {t('save')}
           </Button>
           <Button
             type="button"
@@ -600,7 +607,7 @@ export default function ImportScreen({ onBack }: ImportScreenProps) {
             disabled={saving}
             onClick={() => void handleAddAnother()}
           >
-            Add Another
+            {t('addAnother')}
           </Button>
           {feedback?.kind === 'error' ? (
             <p className="text-center text-sm font-medium leading-snug text-red-400">{feedback.message}</p>

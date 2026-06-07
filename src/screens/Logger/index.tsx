@@ -1,15 +1,34 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Check, Plus, Trash2 } from 'lucide-react';
-import { ProgressionStatusNote } from '@/components/ProgressionStatusNote';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { ArrowLeft, ArrowRight, Plus } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
 import { Button, Card } from '@/components/ui';
 import type { LoggerTemplateExercise } from '@/constants/workoutPrograms';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db, getProfile } from '@/services/db';
-import { buildPrRecordsForSession, isSetPersonalRecord } from '@/services/prDetection';
+import {
+  buildPrRecordsForSession,
+  checkIfPR,
+  isSetPersonalRecord,
+  parseLoggerSetWeightReps,
+} from '@/services/prDetection';
 import {
   canonicalExerciseId,
   formatTargetLineForExercise,
   getLastPerformedSummary,
-  getRecLastLayout,
   isTimedHoldExercise,
   parseRecommendLine,
   previewExerciseTarget,
@@ -17,28 +36,16 @@ import {
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession, WorkoutType } from '@/types';
 import ExercisePicker, { type ExercisePickerFilter } from '@/screens/Logger/ExercisePicker';
-
-type SetRow = {
-  id: string;
-  weight: string;
-  reps: string;
-  completed: boolean;
-  /** True when this completed set beats all prior Dexie history + other sets this workout. */
-  isPR?: boolean;
-};
-
-type LoggerExercise = {
-  exerciseId: string;
-  muscleGroup: MuscleGroup;
-  name: string;
-  equipment: Exercise['equipment'];
-  /** Timed hold: reps field is seconds. */
-  timedHold: boolean;
-  recommend: string;
-  last: string;
-  progressionStatus: ProgressionStatus;
-  sets: SetRow[];
-};
+import SortableExercise from '@/screens/Logger/SortableExercise';
+import {
+  fieldInputClass,
+  getRecommendBadgeConfig,
+  setActionsBtnClass,
+  type LoggerExercise,
+  type RecommendBadgeConfig,
+  type SetRow,
+} from '@/screens/Logger/shared';
+import { toDisplayName } from '@/utils/toDisplayName';
 
 function makeId(): string {
   return Math.random().toString(36).slice(2, 11);
@@ -79,28 +86,43 @@ async function buildLoggerExerciseRow(def: LoggerTemplateExercise): Promise<Logg
   const profile = await getProfile();
   const goal = profile?.goal ?? 'muscle';
   const pharma = profile?.pharmacology ?? 'natural';
+  const cid = canonicalExerciseId(def.exerciseId);
+
+  let storedTarget = await db.exerciseTargets.get(cid);
+  if (!storedTarget && def.exerciseId !== cid) {
+    storedTarget = await db.exerciseTargets.get(def.exerciseId);
+  }
+
   const preview = await previewExerciseTarget(def.exerciseId, def.name, goal, pharma);
   const progressionStatus: ProgressionStatus = preview?.progressionStatus ?? 'first_session';
 
-  const meta = await db.exercises.get(canonicalExerciseId(def.exerciseId));
+  const meta = await db.exercises.get(cid);
   const timedHold = isTimedHoldExercise(def.exerciseId, def.name, meta?.timedHold);
 
-  const target = await db.exerciseTargets.get(def.exerciseId);
+  const target =
+    storedTarget != null
+      ? { weight: storedTarget.weight, reps: storedTarget.reps, sets: storedTarget.sets }
+      : preview != null
+        ? { weight: preview.weight, reps: preview.reps, sets: preview.sets }
+        : null;
+
   const last = await getLastPerformedSummary(def.exerciseId);
+  /** Dexie / engine may omit sets or use 0; still apply weight×reps with a sensible set count. */
+  const numSets = target != null ? Math.max(1, Number(target.sets) || 3) : 0;
   const recommend = target
     ? formatTargetLineForExercise(
         def.exerciseId,
         def.name,
         target.weight,
         target.reps,
-        target.sets,
+        numSets,
         def.equipment,
         timedHold,
       )
     : '';
   const sets =
-    target && target.sets > 0
-      ? Array.from({ length: target.sets }, () => ({
+    target != null && numSets > 0
+      ? Array.from({ length: numSets }, () => ({
           id: makeId(),
           weight: def.equipment === 'bodyweight' ? '0' : String(target.weight),
           reps: String(target.reps),
@@ -140,26 +162,41 @@ async function buildSwappedLoggerExercise(old: LoggerExercise, picked: Exercise)
   const profile = await getProfile();
   const goal = profile?.goal ?? 'muscle';
   const pharma = profile?.pharmacology ?? 'natural';
+  const cid = canonicalExerciseId(picked.id);
+
+  let storedTarget = await db.exerciseTargets.get(cid);
+  if (!storedTarget && picked.id !== cid) {
+    storedTarget = await db.exerciseTargets.get(picked.id);
+  }
+
   const preview = await previewExerciseTarget(picked.id, picked.name, goal, pharma);
   const progressionStatus: ProgressionStatus = preview?.progressionStatus ?? 'first_session';
   const timedHold = isTimedHoldExercise(picked.id, picked.name, picked.timedHold);
-  const target = await db.exerciseTargets.get(picked.id);
+
+  const target =
+    storedTarget != null
+      ? { weight: storedTarget.weight, reps: storedTarget.reps, sets: storedTarget.sets }
+      : preview != null
+        ? { weight: preview.weight, reps: preview.reps, sets: preview.sets }
+        : null;
+
   const last = await getLastPerformedSummary(picked.id);
+  const numSets = target != null ? Math.max(1, Number(target.sets) || 3) : 0;
   const recommend = target
     ? formatTargetLineForExercise(
         picked.id,
         picked.name,
         target.weight,
         target.reps,
-        target.sets,
+        numSets,
         picked.equipment,
         timedHold,
       )
     : '';
 
   let sets: SetRow[];
-  if (target && target.sets > 0) {
-    sets = Array.from({ length: target.sets }, () => ({
+  if (target != null && numSets > 0) {
+    sets = Array.from({ length: numSets }, () => ({
       id: makeId(),
       weight: picked.equipment === 'bodyweight' ? '0' : String(target.weight),
       reps: String(target.reps),
@@ -233,14 +270,74 @@ function buildSessionExercises(exercises: LoggerExercise[]): SessionExercise[] {
   });
 }
 
-const inputClass =
-  'min-w-0 flex-1 rounded-lg border border-border bg-surface p-2 text-center font-mono text-sm text-text-primary outline-none transition-colors focus:border-accent';
 
 function formatRestMmSs(totalSec: number): string {
   const s = Math.max(0, totalSec);
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+function findNextIncompleteExIdx(list: LoggerExercise[], completedIdx: number): number | null {
+  const incomplete = (ex: LoggerExercise) => !(ex.sets.length > 0 && ex.sets.every((s) => s.completed));
+  for (let j = completedIdx + 1; j < list.length; j++) {
+    if (incomplete(list[j])) return j;
+  }
+  for (let j = 0; j < completedIdx; j++) {
+    if (incomplete(list[j])) return j;
+  }
+  return null;
+}
+
+const WORKOUT_DRAFT_KEY = 'coaich-workout-draft';
+/** Drafts older than this are considered stale and ignored on restore. */
+const WORKOUT_DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+interface WorkoutDraft {
+  exercises: LoggerExercise[];
+  workoutName: string;
+  workoutType: string;
+  workoutStartMs: number | null;
+  sessionStartedAtIso: string | null;
+  isStarted: boolean;
+  savedAt: number;
+}
+
+/** Synchronously read a non-stale workout draft from localStorage (used as a lazy state initializer). */
+function readFreshWorkoutDraft(): WorkoutDraft | null {
+  try {
+    const raw = localStorage.getItem(WORKOUT_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<WorkoutDraft>;
+    if (
+      !parsed ||
+      !Array.isArray(parsed.exercises) ||
+      parsed.exercises.length === 0 ||
+      typeof parsed.savedAt !== 'number'
+    ) {
+      return null;
+    }
+    if (Date.now() - parsed.savedAt > WORKOUT_DRAFT_MAX_AGE_MS) return null;
+    return {
+      exercises: parsed.exercises as LoggerExercise[],
+      workoutName: typeof parsed.workoutName === 'string' ? parsed.workoutName : '',
+      workoutType: typeof parsed.workoutType === 'string' ? parsed.workoutType : 'custom',
+      workoutStartMs: typeof parsed.workoutStartMs === 'number' ? parsed.workoutStartMs : null,
+      sessionStartedAtIso: typeof parsed.sessionStartedAtIso === 'string' ? parsed.sessionStartedAtIso : null,
+      isStarted: parsed.isStarted === true,
+      savedAt: parsed.savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearWorkoutDraft(): void {
+  try {
+    localStorage.removeItem(WORKOUT_DRAFT_KEY);
+  } catch {
+    // ignore storage errors (private mode / quota)
+  }
 }
 
 export interface LoggerScreenProps {
@@ -260,17 +357,76 @@ export default function LoggerScreen({
   onFinish,
   onClose,
 }: LoggerScreenProps) {
-  const [startedAt] = useState(() => new Date().toISOString());
-  const [seconds, setSeconds] = useState(0);
+  const { t, lang } = useTranslation();
+  /** Wall-clock start when user taps Start; used for saved duration (accurate when backgrounded). */
+  const [workoutStartMs, setWorkoutStartMs] = useState<number | null>(null);
+  const [sessionStartedAtIso, setSessionStartedAtIso] = useState<string | null>(null);
+  /** Bumps once per second while workout is running so the header re-reads Date.now() (not used to accumulate duration). */
+  const [, setClockTick] = useState(0);
+  /** Workout clock runs only after the user taps Start Session (not on mount). */
+  const [isStarted, setIsStarted] = useState(false);
   const [exercises, setExercises] = useState<LoggerExercise[]>(() => skeletonFromTemplate(exerciseTemplate));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [swapExIdx, setSwapExIdx] = useState<number | null>(null);
   const [pickerInitialFilter, setPickerInitialFilter] = useState<ExercisePickerFilter | undefined>(undefined);
   const [removeConfirm, setRemoveConfirm] = useState<{ exIdx: number; name: string } | null>(null);
+  /** Single expanded exercise accordion; `0` = first exercise open by default. */
+  const [expandedExIdx, setExpandedExIdx] = useState<number | null>(0);
   const templateKey = exerciseTemplate.map((e) => e.exerciseId).join('|');
+  const templateLoadGenRef = useRef(0);
   const [restDurationSec, setRestDurationSec] = useState(90);
-  const [restRemaining, setRestRemaining] = useState<number | null>(null);
+  /** Wall-clock end of rest period (ms); remaining is derived from Date.now(). */
+  const [restEndTime, setRestEndTime] = useState<number | null>(null);
+  /** Bumps once per second while rest is active so UI re-reads Date.now(). */
+  const [restTick, setRestTick] = useState(0);
   const [restZeroFlash, setRestZeroFlash] = useState(false);
+  const restCompleteHandledRef = useRef(false);
+  const [prBanner, setPrBanner] = useState<{ show: boolean; exerciseName: string; weight: number } | null>(null);
+  /** Weight PRs already celebrated this session (key: canonicalId-weight) so we don't re-trigger. */
+  const prCelebratedRef = useRef<Set<string>>(new Set());
+  /** Non-null while a recoverable draft is awaiting the user's restore/decision. */
+  const [restoreDraft, setRestoreDraft] = useState<WorkoutDraft | null>(() => readFreshWorkoutDraft());
+  /** Set when a draft is restored so name/type follow the draft rather than the freshly-mounted props. */
+  const [restoredMeta, setRestoredMeta] = useState<{ name: string; type: string } | null>(null);
+  const effectiveWorkoutName = restoredMeta?.name ?? workoutName;
+  const effectiveWorkoutType = restoredMeta?.type ?? workoutType;
+  const addExerciseFooterLabel = lang === 'ru' ? 'Упражнение' : 'Exercise';
+  const startFooterLabel = lang === 'ru' ? 'Начать' : 'Start';
+  const finishFooterLabel = lang === 'ru' ? 'Завершить' : 'Finish';
+
+  const getBadgeLabel = (label: RecommendBadgeConfig['label']) => {
+    switch (label) {
+      case 'HOLD':
+        return t('statusHold');
+      case 'BASE':
+        return t('statusBase');
+      case 'DELOAD':
+        return t('statusDeload');
+      default:
+        return t('statusRec');
+    }
+  };
+
+  const localizedWorkoutName = (() => {
+    switch (effectiveWorkoutType) {
+      case 'push':
+        return t('pushWorkoutName');
+      case 'pull':
+        return t('pullWorkoutName');
+      case 'legs':
+        return t('legsWorkoutName');
+      case 'full_body':
+        return t('fullBodyWorkoutName');
+      case 'custom':
+        return effectiveWorkoutName === 'Custom Workout' ? t('customWorkoutName') : toDisplayName(effectiveWorkoutName);
+      default:
+        return toDisplayName(effectiveWorkoutName);
+    }
+  })();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,39 +449,100 @@ export default function LoggerScreen({
   }, [openExercisePickerOnMount]);
 
   useEffect(() => {
+    const gen = ++templateLoadGenRef.current;
     let cancelled = false;
-    setExercises(skeletonFromTemplate(exerciseTemplate));
+    const sk = skeletonFromTemplate(exerciseTemplate);
+    setExercises(sk);
+    setExpandedExIdx(sk.length > 0 ? 0 : null);
+    const template = exerciseTemplate;
     void (async () => {
-      const built = await buildLoggerExercisesFromTemplate(exerciseTemplate);
-      if (!cancelled) setExercises(built);
+      const built = await buildLoggerExercisesFromTemplate(template);
+      if (cancelled || gen !== templateLoadGenRef.current) return;
+      setExercises(built);
+      setExpandedExIdx(built.length > 0 ? 0 : null);
     })();
     return () => {
       cancelled = true;
     };
-  }, [workoutName, workoutType, templateKey]);
+  }, [workoutName, workoutType, templateKey, exerciseTemplate]);
 
+  /**
+   * Persist an in-progress workout to localStorage on every change so an iOS PWA kill
+   * doesn't lose data. Skipped while a restore prompt is pending so the recoverable
+   * draft isn't overwritten before the user decides.
+   */
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setSeconds((s) => s + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    if (restRemaining === null) return undefined;
-    if (restRemaining <= 0) {
-      setRestZeroFlash(true);
-      const done = window.setTimeout(() => {
-        setRestZeroFlash(false);
-        setRestRemaining(null);
-      }, 650);
-      return () => window.clearTimeout(done);
+    if (restoreDraft) return;
+    if (exercises.length === 0) return;
+    const draft: WorkoutDraft = {
+      exercises,
+      workoutName: effectiveWorkoutName,
+      workoutType: effectiveWorkoutType,
+      workoutStartMs,
+      sessionStartedAtIso,
+      isStarted,
+      savedAt: Date.now(),
+    };
+    try {
+      localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // ignore storage errors (private mode / quota)
     }
-    const id = window.setInterval(() => {
-      setRestRemaining((r) => (r === null || r <= 0 ? r : r - 1));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [restRemaining]);
+  }, [
+    exercises,
+    effectiveWorkoutName,
+    effectiveWorkoutType,
+    workoutStartMs,
+    sessionStartedAtIso,
+    isStarted,
+    restoreDraft,
+  ]);
+
+  /** Re-sync header elapsed when returning from background; no interval for workout wall time. */
+  useEffect(() => {
+    if (workoutStartMs == null) return undefined;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setClockTick((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [workoutStartMs]);
+
+  const restRemaining = useMemo(() => {
+    if (restEndTime == null) return null;
+    void restTick;
+    return Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
+  }, [restEndTime, restTick]);
+
+  useEffect(() => {
+    if (restEndTime == null) {
+      restCompleteHandledRef.current = false;
+      return undefined;
+    }
+    const bump = () => setRestTick((n) => n + 1);
+    const id = window.setInterval(bump, 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [restEndTime]);
+
+  useEffect(() => {
+    if (restEndTime == null || restRemaining === null || restRemaining > 0) return undefined;
+    if (restCompleteHandledRef.current) return undefined;
+    restCompleteHandledRef.current = true;
+    setRestZeroFlash(true);
+    const done = window.setTimeout(() => {
+      setRestZeroFlash(false);
+      setRestEndTime(null);
+      restCompleteHandledRef.current = false;
+    }, 650);
+    return () => window.clearTimeout(done);
+  }, [restEndTime, restRemaining]);
 
   const formatElapsed = useCallback((total: number) => {
     const h = Math.floor(total / 3600);
@@ -335,19 +552,41 @@ export default function LoggerScreen({
   }, []);
 
   const tryClose = () => {
-    if (window.confirm('End workout?')) {
+    if (window.confirm(t('endWorkout'))) {
+      clearWorkoutDraft();
       onClose();
     }
   };
 
+  const handleRestoreDraft = () => {
+    if (!restoreDraft) return;
+    // Invalidate any in-flight template build so it can't overwrite the restored exercises.
+    templateLoadGenRef.current += 1;
+    setExercises(restoreDraft.exercises);
+    setExpandedExIdx(restoreDraft.exercises.length > 0 ? 0 : null);
+    setRestoredMeta({ name: restoreDraft.workoutName, type: restoreDraft.workoutType });
+    setWorkoutStartMs(restoreDraft.workoutStartMs);
+    setSessionStartedAtIso(restoreDraft.sessionStartedAtIso);
+    setIsStarted(restoreDraft.isStarted);
+    setRestoreDraft(null);
+  };
+
+  const handleDiscardDraft = () => {
+    clearWorkoutDraft();
+    setRestoreDraft(null);
+  };
+
   const dismissRestTimer = useCallback(() => {
-    setRestRemaining(null);
+    setRestEndTime(null);
     setRestZeroFlash(false);
+    restCompleteHandledRef.current = false;
   }, []);
 
   const startRestTimer = useCallback(() => {
     setRestZeroFlash(false);
-    setRestRemaining(restDurationSec);
+    restCompleteHandledRef.current = false;
+    setRestEndTime(Date.now() + restDurationSec * 1000);
+    setRestTick((n) => n + 1);
   }, [restDurationSec]);
 
   const runPrCheck = useCallback(async (exIdx: number, setIdx: number) => {
@@ -373,6 +612,29 @@ export default function LoggerScreen({
     });
   }, []);
 
+  const celebratePrIfNeeded = useCallback(
+    async (exIdx: number, setIdx: number) => {
+      const ex = exercises[exIdx];
+      const set = ex?.sets[setIdx];
+      if (!ex || !set || ex.equipment === 'bodyweight') return;
+      const parsed = parseLoggerSetWeightReps(set, ex.equipment);
+      if (!parsed || parsed.weight <= 0) return;
+      const key = `${canonicalExerciseId(ex.exerciseId)}-${parsed.weight}`;
+      if (prCelebratedRef.current.has(key)) return;
+      const isPr = await checkIfPR(ex.exerciseId, parsed.weight);
+      if (!isPr) return;
+      prCelebratedRef.current.add(key);
+      setPrBanner({ show: true, exerciseName: toDisplayName(ex.name), weight: parsed.weight });
+    },
+    [exercises],
+  );
+
+  useEffect(() => {
+    if (!prBanner?.show) return undefined;
+    const id = window.setTimeout(() => setPrBanner(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [prBanner]);
+
   const toggleSetComplete = useCallback(
     (exIdx: number, setIdx: number) => {
       const willComplete = !exercises[exIdx]?.sets[setIdx]?.completed;
@@ -381,14 +643,23 @@ export default function LoggerScreen({
         const row = next[exIdx].sets[setIdx];
         row.completed = willComplete;
         row.isPR = false;
+        if (willComplete) {
+          const ex = next[exIdx];
+          const allDone = ex.sets.length > 0 && ex.sets.every((s) => s.completed);
+          if (allDone) {
+            const nextIdx = findNextIncompleteExIdx(next, exIdx);
+            queueMicrotask(() => setExpandedExIdx(nextIdx));
+          }
+        }
         return next;
       });
       if (willComplete) {
         startRestTimer();
         void runPrCheck(exIdx, setIdx);
+        void celebratePrIfNeeded(exIdx, setIdx);
       }
     },
-    [exercises, runPrCheck, startRestTimer],
+    [exercises, runPrCheck, startRestTimer, celebratePrIfNeeded],
   );
 
   function updateSet(
@@ -415,7 +686,43 @@ export default function LoggerScreen({
     if (!removeConfirm) return;
     const { exIdx } = removeConfirm;
     setRemoveConfirm(null);
+    const nextLen = exercises.length - 1;
+    setExpandedExIdx((exp) => {
+      if (nextLen <= 0) return null;
+      if (exp === null) return 0;
+      if (exp === exIdx) return Math.min(exIdx, nextLen - 1);
+      if (exp > exIdx) return exp - 1;
+      return exp;
+    });
     setExercises((prev) => prev.filter((_, i) => i !== exIdx));
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setExercises((prev) => {
+      const oldIndex = prev.findIndex((_, i) => `ex-${i}` === active.id);
+      const newIndex = prev.findIndex((_, i) => `ex-${i}` === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      queueMicrotask(() => {
+        setExpandedExIdx((exp) => {
+          if (exp === null) return null;
+          if (exp === oldIndex) return newIndex;
+          if (oldIndex < newIndex) {
+            if (exp > oldIndex && exp <= newIndex) return exp - 1;
+          } else if (oldIndex > newIndex) {
+            if (exp >= newIndex && exp < oldIndex) return exp + 1;
+          }
+          return exp;
+        });
+      });
+      return arrayMove(prev, oldIndex, newIndex);
+    });
   };
 
   const addSet = (exIdx: number) => {
@@ -429,6 +736,16 @@ export default function LoggerScreen({
           : ex,
       );
       return next;
+    });
+  };
+
+  const removeSet = (exIdx: number, setIdx: number) => {
+    setExercises((prev) => {
+      const ex = prev[exIdx];
+      if (!ex || ex.sets.length <= 1) return prev;
+      return prev.map((row, i) =>
+        i === exIdx ? { ...row, sets: row.sets.filter((_, j) => j !== setIdx) } : row,
+      );
     });
   };
 
@@ -479,15 +796,23 @@ export default function LoggerScreen({
 
   const handleFinish = async () => {
     if (exercises.length === 0) return;
+    let sessionName = effectiveWorkoutName;
+    if (effectiveWorkoutType === 'custom') {
+      const fallback = lang === 'ru' ? 'Своя' : 'Custom';
+      const entered = window.prompt(lang === 'ru' ? 'Название тренировки' : 'Workout name', fallback);
+      sessionName = entered && entered.trim() ? entered.trim() : fallback;
+    }
     const id = crypto.randomUUID();
-    const finishedAt = new Date().toISOString();
-    const durationMinutes = Math.max(1, Math.ceil(seconds / 60));
+    const finishedAtMs = Date.now();
+    const finishedAt = new Date(finishedAtMs).toISOString();
+    const startMs = workoutStartMs ?? finishedAtMs;
+    const durationMinutes = Math.max(1, Math.round((finishedAtMs - startMs) / 60000));
     const totalVolume = computeTotalVolume(exercises);
     const session: WorkoutSession = {
       id,
-      name: workoutName,
-      type: toWorkoutType(workoutType),
-      startedAt,
+      name: sessionName,
+      type: toWorkoutType(effectiveWorkoutType),
+      startedAt: sessionStartedAtIso ?? new Date(startMs).toISOString(),
       finishedAt,
       durationMinutes,
       totalVolume,
@@ -495,15 +820,64 @@ export default function LoggerScreen({
       ratings: [],
     };
     await db.workoutSessions.add(session);
-    const prRows = buildPrRecordsForSession(id, finishedAt, exercises);
+    const prRows = buildPrRecordsForSession(
+      id,
+      finishedAt,
+      exercises.map((ex) => ({
+        exerciseId: ex.exerciseId,
+        exerciseName: ex.name,
+        equipment: ex.equipment,
+        sets: ex.sets,
+      })),
+    );
     if (prRows.length > 0) {
       await db.prRecords.bulkAdd(prRows);
     }
+    clearWorkoutDraft();
     onFinish(id);
   };
 
+  const restoreDraftName = restoreDraft ? toDisplayName(restoreDraft.workoutName) : '';
+  const restoreBannerText =
+    lang === 'ru'
+      ? `Найдена незавершённая тренировка ${restoreDraftName}. Восстановить?`
+      : `Found an unfinished workout: ${restoreDraftName}. Restore it?`;
+  const restoreLabel = lang === 'ru' ? 'Восстановить' : 'Restore';
+  const startFreshLabel = lang === 'ru' ? 'Начать заново' : 'Start fresh';
+
+  const prWeightStr = prBanner
+    ? Number.isInteger(prBanner.weight)
+      ? String(prBanner.weight)
+      : prBanner.weight.toFixed(1).replace(/\.0$/, '')
+    : '';
+  const prBannerText = prBanner
+    ? lang === 'ru'
+      ? `Личный рекорд! ${prBanner.exerciseName} — ${prWeightStr}${t('kgUnit')}`
+      : `Personal Record! ${prBanner.exerciseName} — ${prWeightStr}${t('kgUnit')}`
+    : '';
+
   return (
-    <div className="flex min-h-screen w-full flex-col bg-bg">
+    <div className="flex min-h-screen w-full flex-col bg-[#0A0A0A] pt-1">
+      <AnimatePresence>
+        {prBanner?.show ? (
+          <motion.div
+            key="pr-banner"
+            initial={{ y: -24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -24, opacity: 0 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+            className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+12px)] z-[80] w-[calc(100%-2rem)] max-w-[360px] -translate-x-1/2"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-[#F59E0B]/50 bg-gradient-to-r from-[#F59E0B] to-[#FBBF24] px-5 py-3 text-center text-sm font-black text-[#1A1206] shadow-[0_14px_44px_-10px_rgba(245,158,11,0.65)]">
+              <span aria-hidden>🏆</span>
+              <span className="min-w-0">{prBannerText}</span>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
       <ExercisePicker
         open={pickerOpen}
         onClose={closePicker}
@@ -516,12 +890,12 @@ export default function LoggerScreen({
           <button
             type="button"
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            aria-label="Close"
+            aria-label={t('close')}
             onClick={() => setRemoveConfirm(null)}
           />
-          <Card className="relative z-10 w-full max-w-sm border-border p-5 shadow-2xl">
-            <p className="text-center text-sm font-medium leading-snug text-text-primary">
-              Remove {removeConfirm.name}?
+          <Card className="relative z-10 w-full max-w-sm border-[#2A2A2A] bg-[#1C1C1C] p-5 shadow-2xl">
+            <p className="text-center text-sm font-medium leading-snug text-white">
+              {t('remove')} {removeConfirm.name}?
             </p>
             <div className="mt-4 flex gap-2">
               <Button
@@ -532,7 +906,7 @@ export default function LoggerScreen({
                 className="flex-1"
                 onClick={() => setRemoveConfirm(null)}
               >
-                Cancel
+                {t('cancel')}
               </Button>
               <Button
                 type="button"
@@ -542,214 +916,174 @@ export default function LoggerScreen({
                 className="flex-1"
                 onClick={confirmRemoveExercise}
               >
-                Remove
+                {t('remove')}
               </Button>
             </div>
           </Card>
         </div>
       ) : null}
 
-      <header className="sticky top-0 z-10 shrink-0 border-b border-border bg-bg/95 px-5 py-4 backdrop-blur-md">
-        <div className="mb-3 flex items-start gap-3">
+      <div className="sticky top-0 z-10 border-b border-[#2A2A2A] bg-[#0A0A0A] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.65)]">
+        <header className="flex shrink-0 items-center gap-4 px-6 py-4">
           <button
             type="button"
             onClick={tryClose}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-primary transition-colors active:scale-[0.98]"
-            aria-label="Close workout"
+            className="-ml-1 shrink-0 p-1 text-white transition-opacity hover:opacity-80"
+            aria-label={t('closeWorkout')}
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-6 w-6" />
           </button>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold leading-tight text-text-primary">{workoutName}</h2>
-            <div className="mt-1 flex items-center gap-1.5 font-mono text-sm font-bold text-accent">
-              <span aria-hidden>⏱</span>
-              <span>{formatElapsed(seconds)}</span>
-            </div>
+          <div>
+            <h1 className="text-lg font-bold text-white">{localizedWorkoutName}</h1>
+            <p className="font-mono text-sm font-medium tabular-nums text-[#6B7280]">
+              {formatElapsed(
+                workoutStartMs == null ? 0 : Math.max(0, Math.floor((Date.now() - workoutStartMs) / 1000)),
+              )}
+            </p>
           </div>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 pb-32 no-scrollbar">
-        {exercises.length === 0 ? (
-          <Card className="border-border py-10 text-center">
-            <p className="text-sm text-text-secondary">No exercises yet. Tap + Add Exercise to begin.</p>
-          </Card>
-        ) : (
-          exercises.map((ex, exIdx) => {
-            const recLastLayout = getRecLastLayout(
-              ex.recommend.trim(),
-              ex.last.trim(),
-              ex.progressionStatus,
-            );
-            const isBw = ex.equipment === 'bodyweight';
-            const isTimed = ex.timedHold;
-            return (
-            <Card key={`${ex.exerciseId}-${exIdx}`} className="border-border">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="min-w-0 flex-1 text-lg font-bold leading-tight text-text-primary">{ex.name}</h3>
-                <button
-                  type="button"
-                  onClick={() => setRemoveConfirm({ exIdx, name: ex.name })}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-text-secondary/50 transition-colors hover:text-red-400"
-                  aria-label={`Remove ${ex.name}`}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
-              <div className="mt-3 flex flex-col gap-2">
-                {recLastLayout.kind === 'unified' ? (
-                  <p className="font-mono text-[13px] font-bold uppercase leading-snug tracking-wide">
-                    <span className="text-text-secondary">{recLastLayout.label} </span>
-                    <span className={recLastLayout.lineClass}>{recLastLayout.value}</span>
-                  </p>
-                ) : (
-                  <>
-                    {ex.recommend.trim() ? (
-                      <p className="font-mono text-[13px] font-bold uppercase leading-snug tracking-wide text-accent">
-                        RECOMMEND {ex.recommend}
-                      </p>
-                    ) : null}
-                    <p className="font-mono text-[13px] font-bold uppercase leading-snug tracking-wide text-text-secondary">
-                      LAST {ex.last}
-                    </p>
-                  </>
-                )}
-                <ProgressionStatusNote status={ex.progressionStatus} />
-              </div>
-
-              <div className="mt-4 flex flex-col gap-2">
-                {ex.sets.map((set, setIdx) => (
-                  <div key={set.id} className="flex items-center gap-2">
-                    <span className="w-11 shrink-0 text-[10px] font-bold text-text-secondary">
-                      SET {setIdx + 1}
-                    </span>
-                    {!isBw ? (
-                      <>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          placeholder="kg"
-                          className={inputClass}
-                          value={set.weight}
-                          onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value)}
-                          onFocus={(e) => e.currentTarget.select()}
-                        />
-                        <span className="shrink-0 text-text-secondary">×</span>
-                      </>
-                    ) : null}
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder={isTimed ? 's' : 'reps'}
-                      aria-label={isTimed ? 'Seconds' : 'Reps'}
-                      className={`${inputClass} ${isBw ? 'flex-1' : ''}`}
-                      value={set.reps}
-                      onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                    {isTimed ? (
-                      <span className="shrink-0 text-xs font-medium text-text-secondary" aria-hidden>
-                        s
-                      </span>
-                    ) : null}
-                    {set.isPR ? (
-                      <span
-                        key={`pr-${set.id}-on`}
-                        className="animate-pr-pop flex shrink-0 items-center gap-0.5 rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#F59E0B]"
-                        title="Personal record"
-                      >
-                        <span aria-hidden>🏆</span>
-                        PR
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      aria-label={set.completed ? 'Uncomplete set' : 'Complete set'}
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                        set.completed
-                          ? 'border-accent bg-accent text-white'
-                          : 'border-border bg-surface text-text-secondary'
-                      }`}
-                      onClick={() => toggleSetComplete(exIdx, setIdx)}
-                    >
-                      <Check className="h-5 w-5" strokeWidth={2.5} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-3 flex flex-col items-center gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => addSet(exIdx)}
-                  className="border border-border/50 bg-transparent px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-none hover:bg-surface/50 hover:text-text-primary"
-                >
-                  + ADD SET
-                </Button>
-                <button
-                  type="button"
-                  className="text-center text-xs text-text-secondary/50 underline-offset-2 hover:text-text-secondary hover:underline"
-                  onClick={() => openPickerForSwap(exIdx, ex.muscleGroup)}
-                >
-                  swap exercise
-                </button>
-              </div>
-            </Card>
-            );
-          })
-        )}
+        </header>
       </div>
 
-      {restRemaining !== null ? (
-        <div
-          className="fixed bottom-[5.75rem] left-0 right-0 z-[45] flex justify-center px-5 pointer-events-none"
-          role="status"
-          aria-live="polite"
-          aria-label={`Rest timer ${formatRestMmSs(restRemaining)} remaining`}
-        >
-          <div
-            className={`pointer-events-auto flex items-center gap-5 rounded-full border px-6 py-3 backdrop-blur-md bg-surface transition-[border-color,box-shadow] duration-150 ${
-              restZeroFlash
-                ? 'animate-pulse border-accent shadow-lg shadow-accent/35 ring-2 ring-accent/50'
-                : 'border-accent/40'
-            }`}
-          >
-            <span className="whitespace-nowrap font-mono text-sm font-bold tabular-nums tracking-tight text-text-primary">
-              Rest {formatRestMmSs(restRemaining)}
-            </span>
+      {restoreDraft ? (
+        <div className="shrink-0 border-b border-[#8B5CF6]/30 bg-[#8B5CF6]/10 px-4 py-3">
+          <p className="text-sm font-medium leading-snug text-white">{restoreBannerText}</p>
+          <div className="mt-3 flex gap-2">
             <button
               type="button"
-              onClick={dismissRestTimer}
-              className="shrink-0 text-sm font-semibold text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline"
+              onClick={handleRestoreDraft}
+              className="flex-1 whitespace-nowrap rounded-xl bg-[#8B5CF6] py-2.5 text-sm font-bold text-white transition-all active:scale-[0.98]"
             >
-              Skip
+              {restoreLabel}
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardDraft}
+              className="flex-1 whitespace-nowrap rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-2.5 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
+            >
+              {startFreshLabel}
             </button>
           </div>
         </div>
       ) : null}
 
-      <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex justify-center border-t border-border bg-bg/95 backdrop-blur-md">
-        <div className="pointer-events-auto flex w-full max-w-[390px] items-stretch gap-3 px-5 py-4">
-          <Button type="button" variant="dark" size="md" className="min-w-0 flex-1" onClick={openPickerForAdd}>
-            <Plus className="h-4 w-4 shrink-0" aria-hidden />
-            + Add Exercise
-          </Button>
-          <Button
+      <div className="min-h-0 flex-1 space-y-10 overflow-y-auto px-4 py-8 pb-40 no-scrollbar">
+        {exercises.length === 0 ? (
+          <div className="rounded-2xl border border-[#2A2A2A] bg-[#141414] py-10 text-center">
+            <p className="text-sm text-[#6B7280]">{t('noExercisesYet')}</p>
+          </div>
+        ) : (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={exercises.map((_, i) => `ex-${i}`)} strategy={verticalListSortingStrategy}>
+              {exercises.map((ex, exIdx) => (
+                <SortableExercise
+                  key={`ex-${exIdx}`}
+                  sortableId={`ex-${exIdx}`}
+                  ex={ex}
+                  exIdx={exIdx}
+                  targetLine={ex.recommend.trim()}
+                  progressionStatus={ex.progressionStatus}
+                  expanded={expandedExIdx === exIdx}
+                  onAccordionToggle={() => setExpandedExIdx((p) => (p === exIdx ? null : exIdx))}
+                  updateSet={updateSet}
+                  toggleSetComplete={toggleSetComplete}
+                  addSet={addSet}
+                  removeSet={removeSet}
+                  openPickerForSwap={openPickerForSwap}
+                  setRemoveConfirm={setRemoveConfirm}
+                  t={t}
+                  lang={lang}
+                  getBadgeLabel={getBadgeLabel}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {restEndTime !== null || restZeroFlash ? (
+          <motion.div
+            key="rest-timer"
+            initial={{ y: 18, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 18, opacity: 0 }}
+            className="fixed bottom-[100px] left-1/2 z-40 -translate-x-1/2"
+            role="status"
+            aria-live="polite"
+            aria-label={`${t('rest')} ${formatRestMmSs(restRemaining ?? 0)} ${t('remaining')}`}
+          >
+            <div
+              className={`flex min-h-[64px] items-center rounded-2xl border px-6 py-4 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.55)] transition-all ${
+                restZeroFlash
+                  ? 'animate-pulse border-[#8B5CF6] bg-[#8B5CF6] text-white shadow-[#8B5CF6]/35'
+                  : 'border-[#8B5CF6]/25 bg-[#1C1C1C] shadow-black/40'
+              }`}
+            >
+              <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span
+                  className={`text-xs font-bold uppercase tracking-widest ${
+                    restZeroFlash ? 'text-white/85' : 'text-[#6B7280]'
+                  }`}
+                >
+                  {t('rest')}
+                </span>
+                <span
+                  className={`font-mono text-2xl font-black tabular-nums leading-none ${
+                    restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'
+                  }`}
+                >
+                  {formatRestMmSs(restRemaining ?? 0)}
+                </span>
+              </span>
+              <div className={`mx-5 h-8 w-px shrink-0 ${restZeroFlash ? 'bg-white/30' : 'bg-[#2A2A2A]'}`} aria-hidden />
+              <button
+                type="button"
+                onClick={dismissRestTimer}
+                className={`shrink-0 text-base font-bold ${restZeroFlash ? 'text-white' : 'text-[#8B5CF6]'}`}
+              >
+                {t('skip')}
+              </button>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <footer className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex max-w-[390px] gap-3 border-t border-[#2A2A2A] bg-[#141414] p-4">
+        <button
+          type="button"
+          onClick={openPickerForAdd}
+          className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-5 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
+        >
+          <Plus className="h-[18px] w-[18px]" aria-hidden />
+          {addExerciseFooterLabel}
+        </button>
+        {!isStarted ? (
+          <button
             type="button"
-            variant="primary"
-            size="md"
-            className="shrink-0 px-6"
+            disabled={exercises.length === 0}
+            onClick={() => {
+              const ms = Date.now();
+              setWorkoutStartMs(ms);
+              setSessionStartedAtIso(new Date(ms).toISOString());
+              setIsStarted(true);
+            }}
+            className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#22C55E] py-5 text-sm font-bold text-white shadow-lg shadow-[#22C55E]/25 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {startFooterLabel}
+            <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
             disabled={exercises.length === 0}
             onClick={() => void handleFinish()}
+            className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#8B5CF6] py-5 text-sm font-bold text-white shadow-lg shadow-[#8B5CF6]/20 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Finish
-          </Button>
-        </div>
-      </div>
+            {finishFooterLabel}
+            <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+        )}
+      </footer>
     </div>
   );
 }

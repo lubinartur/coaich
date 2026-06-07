@@ -27,7 +27,14 @@ export type DeloadCheckResult = {
   deloadNeeded: boolean;
   reason: string;
   consecutiveWeeks: number;
-  /** True when deload was triggered by consecutive-week threshold (natural ≥4 or on-cycle ≥6). */
+  /**
+   * True when deload was triggered by the consecutive-week threshold. The threshold itself
+   * depends on pharmacology and recent training frequency:
+   *  - natural, ≥3 sessions/week (avg over last 4 weeks): 4 weeks
+   *  - natural, <3 sessions/week:                          8 weeks
+   *  - on_cycle, ≥3 sessions/week:                         6 weeks
+   *  - on_cycle, <3 sessions/week:                        10 weeks
+   */
   weekThresholdHit: boolean;
 };
 
@@ -408,26 +415,49 @@ function sessionInWeek(s: WorkoutSession, weekStart: Date): boolean {
 }
 
 /**
- * Deload signals from recent history (last 6 weeks in Dexie + last 3 sessions for ratings).
+ * Deload signals from recent history.
+ *
+ * Pulls sessions from the last `LOOKBACK_WEEKS` (10) so we can detect both:
+ *  - consecutive-week streaks up to the largest possible threshold (10 weeks, on-cycle low-frequency)
+ *  - the rolling 4-week frequency average used to choose the threshold
+ *
+ * Frequency adjustment: if avg sessions/week over the last 4 weeks is `< 3`, the
+ * consecutive-week threshold is raised (natural 4 → 8, on_cycle 6 → 10) so people training
+ * 1–2x/week aren't pushed into an unneeded deload.
  */
 export async function checkDeloadNeeded(profile: Profile, now: Date = new Date()): Promise<DeloadCheckResult> {
-  const sixWeeksStart = new Date(now);
-  sixWeeksStart.setDate(sixWeeksStart.getDate() - 42);
-  sixWeeksStart.setHours(0, 0, 0, 0);
+  const LOOKBACK_WEEKS = 10;
+  const lookbackStart = new Date(now);
+  lookbackStart.setDate(lookbackStart.getDate() - 7 * LOOKBACK_WEEKS);
+  lookbackStart.setHours(0, 0, 0, 0);
   const windowSessions = await db.workoutSessions
     .where('finishedAt')
-    .aboveOrEqual(sixWeeksStart.toISOString())
+    .aboveOrEqual(lookbackStart.toISOString())
     .toArray();
+
+  const fourWeeksStart = new Date(now);
+  fourWeeksStart.setDate(fourWeeksStart.getDate() - 28);
+  fourWeeksStart.setHours(0, 0, 0, 0);
+  const nowIso = now.toISOString();
+  const fourWeeksStartIso = fourWeeksStart.toISOString();
+  const recent4WeekSessionCount = windowSessions.filter(
+    (s) => s.finishedAt >= fourWeeksStartIso && s.finishedAt <= nowIso,
+  ).length;
+  const avgSessionsPerWeek = recent4WeekSessionCount / 4;
+  const lowFrequency = avgSessionsPerWeek < 3;
+
+  const baseThreshold = profile.pharmacology === 'on_cycle' ? 6 : 4;
+  const lowFreqThreshold = profile.pharmacology === 'on_cycle' ? 10 : 8;
+  const weekThreshold = lowFrequency ? lowFreqThreshold : baseThreshold;
 
   let consecutiveWeeks = 0;
   let weekRule = false;
-  const weekThreshold = profile.pharmacology === 'on_cycle' ? 6 : 4;
 
   if (windowSessions.length > 0) {
     const sorted = [...windowSessions].sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
     const anchorMonday = startOfWeekMonday(new Date(sorted[0].finishedAt));
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < LOOKBACK_WEEKS; i++) {
       const ws = new Date(anchorMonday);
       ws.setDate(ws.getDate() - 7 * i);
       const has = windowSessions.some((s) => sessionInWeek(s, ws));
@@ -538,8 +568,11 @@ function representativeWeight(ex: SessionExercise): number | null {
   const first = done[0].weight;
   const allSame = done.every((s) => s.weight === first);
   if (allSame) return roundWeightKg(first);
-  const sum = done.reduce((a, s) => a + s.weight, 0);
-  return roundWeightKg(sum / done.length);
+  const maxWeight = Math.max(...done.map((s) => s.weight));
+  const workingSets = done.filter((s) => s.weight >= maxWeight * 0.75);
+  if (workingSets.length === 0) return roundWeightKg(maxWeight);
+  const sum = workingSets.reduce((a, s) => a + s.weight, 0);
+  return roundWeightKg(sum / workingSets.length);
 }
 
 /**
@@ -611,6 +644,31 @@ async function persistTarget(exerciseId: string, pick: Pick<ExerciseTarget, 'wei
     updatedAt: new Date().toISOString(),
   };
   await db.exerciseTargets.put(full);
+}
+
+/**
+ * Seed initial `exerciseTargets` from onboarding 10RM calibration values.
+ * - benchPress10RM → `barbell-bench-press` (weight = value, reps = 10, sets = 3)
+ * - squat10RM     → `back-squat`           (weight = value, reps = 10, sets = 3)
+ * - deadlift10RM  → `deadlift`             (weight = value, reps = 10, sets = 3)
+ *
+ * Source is `progression_engine`. Missing/non-positive values are skipped.
+ */
+export async function seedInitialTargetsFromProfile(profile: Profile): Promise<void> {
+  const seeds: { exerciseId: string; weight: number | undefined }[] = [
+    { exerciseId: 'barbell-bench-press', weight: profile.benchPress10RM },
+    { exerciseId: 'back-squat', weight: profile.squat10RM },
+    { exerciseId: 'deadlift', weight: profile.deadlift10RM },
+  ];
+
+  for (const seed of seeds) {
+    if (typeof seed.weight !== 'number' || !Number.isFinite(seed.weight) || seed.weight <= 0) continue;
+    await persistTarget(canonicalExerciseId(seed.exerciseId), {
+      weight: seed.weight,
+      reps: 10,
+      sets: 3,
+    });
+  }
 }
 
 /**
@@ -716,14 +774,28 @@ export async function getExerciseTarget(
 
     const prevSession = sessions[1];
     const gapDays = daysBetweenSessions(lastSession.finishedAt, prevSession.finishedAt);
-    if (gapDays > 14) {
-      const gapPick = await withRoundedWeight(exerciseId, lastPerf);
+
+    const profile = await getProfile();
+    const effectiveGoal = profile?.goal ?? goal;
+
+    if (gapDays >= 8) {
+      // Long layoff: scale load back so the return session is safe, deeper cut for longer gaps.
+      let factor: number;
+      let gapReps = lastPerf.reps;
+      if (gapDays > 21) {
+        factor = 0.7;
+        gapReps = repRangeForGoal(effectiveGoal).min;
+      } else if (gapDays >= 15) {
+        factor = 0.8;
+      } else {
+        factor = 0.9;
+      }
+      const gapWeight = await roundWeightByExerciseEquipment(exerciseId, lastPerf.weight * factor);
+      const gapPick = { weight: gapWeight, reps: gapReps, sets: lastPerf.sets };
       if (persist) await persistTarget(exerciseId, gapPick);
       return { ...gapPick, source: 'progression_engine', progressionStatus: 'gap_detected' };
     }
 
-    const profile = await getProfile();
-    const effectiveGoal = profile?.goal ?? goal;
     const prevEx = getSessionExercise(prevSession, exerciseId);
     const prevPerf = prevEx ? summarizeSessionExercise(prevEx) : null;
     const prevAvgReps =

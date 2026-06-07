@@ -1,6 +1,8 @@
 /** Anthropic Claude — workout Review (ai-prompts.md). */
 
+import { EXERCISE_SEED } from '@/constants/exercises';
 import { canonicalExerciseId, formatNextTargetLine, isTimedHoldExercise } from '@/services/progressionEngine';
+import { db, type CoachMemoryEntry } from '@/services/db';
 import type {
   AIReview,
   ExerciseRating,
@@ -36,6 +38,8 @@ ATHLETE PROFILE:
 - Experience: ${data.profile.experience}
 
 - Pharmacology: ${data.profile.pharmacology}
+
+- INJURIES: ${data.profile.injuries.join(', ') || 'none'}
 
 ---
 
@@ -145,6 +149,8 @@ Rules:
 
 - wentWell and toImprove: 2-3 items each, no more
 
+- If athlete has injuries, avoid recommending increased load on exercises that stress those areas
+
 - Language: ${data.profile.language === 'ru' ? 'Russian' : 'English'}
 
 `;
@@ -156,43 +162,87 @@ type ParsedReviewShape = Omit<AIReview, 'id' | 'sessionId' | 'generatedAt' | 'ne
   exerciseNotes: ExerciseNoteRaw[];
 };
 
-const parseReviewResponse = (rawText: string): ParsedReviewShape => {
-  try {
-    const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(clean) as unknown;
-    if (!parsed || typeof parsed !== 'object') {
-      return {
-        intro: rawText,
-        wentWell: [],
-        toImprove: [],
-        nextTargets: [],
-        exerciseNotes: [],
-      };
+function emptyParsedReview(intro = ''): ParsedReviewShape {
+  return {
+    intro,
+    wentWell: [],
+    toImprove: [],
+    nextTargets: [],
+    exerciseNotes: [],
+  };
+}
+
+function stripJsonMarkers(rawText: string): string {
+  return rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
+function looksLikeJsonText(rawText: string): boolean {
+  const clean = stripJsonMarkers(rawText);
+  return clean.startsWith('{') || clean.startsWith('[');
+}
+
+function parseReviewResponseInternal(rawText: string, depth = 0): ParsedReviewShape | null {
+  if (depth > 3) return null;
+  const clean = stripJsonMarkers(rawText);
+  if (!clean) return null;
+  const parsed = JSON.parse(clean) as unknown;
+  if (typeof parsed === 'string') {
+    const nestedText = stripJsonMarkers(parsed).trim();
+    if (!nestedText) return null;
+    if (looksLikeJsonText(nestedText)) {
+      return parseReviewResponseInternal(nestedText, depth + 1);
     }
-    const o = parsed as Record<string, unknown>;
-    return {
-      intro: typeof o.intro === 'string' ? o.intro : String(o.intro ?? ''),
-      wentWell: Array.isArray(o.wentWell) ? o.wentWell.map((x) => String(x)) : [],
-      toImprove: Array.isArray(o.toImprove) ? o.toImprove.map((x) => String(x)) : [],
-      nextTargets: Array.isArray(o.nextTargets) ? (o.nextTargets as ParsedReviewShape['nextTargets']) : [],
-      exerciseNotes: Array.isArray(o.exerciseNotes) ? (o.exerciseNotes as ExerciseNoteRaw[]) : [],
-    };
+    return emptyParsedReview(nestedText);
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+  const o = parsed as Record<string, unknown>;
+  const introRaw = typeof o.intro === 'string' ? o.intro : String(o.intro ?? '');
+  if (introRaw && looksLikeJsonText(introRaw)) {
+    const nested = parseReviewResponseInternal(introRaw, depth + 1);
+    if (nested) return nested;
+  }
+  return {
+    intro: introRaw,
+    wentWell: Array.isArray(o.wentWell) ? o.wentWell.map((x) => String(x)) : [],
+    toImprove: Array.isArray(o.toImprove) ? o.toImprove.map((x) => String(x)) : [],
+    nextTargets: Array.isArray(o.nextTargets) ? (o.nextTargets as ParsedReviewShape['nextTargets']) : [],
+    exerciseNotes: Array.isArray(o.exerciseNotes) ? (o.exerciseNotes as ExerciseNoteRaw[]) : [],
+  };
+}
+
+const parseReviewResponse = (rawText: string): ParsedReviewShape => {
+  const clean = stripJsonMarkers(rawText).trim();
+  try {
+    return parseReviewResponseInternal(clean) ?? emptyParsedReview(clean);
   } catch (err) {
     console.error('Failed to parse AI review:', err);
-    return {
-      intro: rawText,
-      wentWell: [],
-      toImprove: [],
-      nextTargets: [],
-      exerciseNotes: [],
-    };
+    return emptyParsedReview(clean);
   }
 };
 
+/** Case-insensitive match; hyphens/dashes/underscores treated as spaces for name ↔ library id alignment. */
+function normalizeForExerciseMatch(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[-–—_/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function resolveExerciseId(session: WorkoutSession, exerciseName: string, hintId?: string): string {
-  if (hintId) return canonicalExerciseId(hintId);
-  const match = session.exercises.find((e) => e.exerciseName.toLowerCase() === exerciseName.toLowerCase());
-  if (match) return canonicalExerciseId(match.exerciseId);
+  const n = normalizeForExerciseMatch(exerciseName);
+  if (n) {
+    const fromSession = session.exercises.find(
+      (e) => normalizeForExerciseMatch(e.exerciseName) === n,
+    );
+    if (fromSession) return canonicalExerciseId(fromSession.exerciseId);
+    const fromSeed = EXERCISE_SEED.find((ex) => normalizeForExerciseMatch(ex.name) === n);
+    if (fromSeed) return canonicalExerciseId(fromSeed.id);
+  }
+  if (hintId?.trim()) return canonicalExerciseId(hintId.trim());
   return canonicalExerciseId(exerciseName);
 }
 
@@ -231,40 +281,21 @@ function normalizeReviewFields(
   };
 }
 
-function viteEnv(key: string): string | undefined {
-  const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
-  return env[key];
-}
-
 export const generateWorkoutReview = async (data: ReviewPromptData): Promise<AIReview> => {
-  const apiKey = viteEnv('VITE_ANTHROPIC_API_KEY');
   const baseId = crypto.randomUUID();
   const generatedAt = new Date().toISOString();
-
-  if (!apiKey?.trim()) {
-    return {
-      id: baseId,
-      sessionId: data.session.id,
-      generatedAt,
-      intro: 'Missing VITE_ANTHROPIC_API_KEY. Add it to your .env file.',
-      wentWell: [],
-      toImprove: [],
-      nextTargets: [],
-      exerciseNotes: [],
-    };
-  }
 
   const prompt = buildReviewPrompt(data);
 
   try {
-    const res = await fetch('/api/anthropic/v1/messages', {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    };
+
+    const res = await fetch('/api/anthropic', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey.trim(),
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers,
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: CLAUDE_MAX_TOKENS,
@@ -313,5 +344,99 @@ export const generateWorkoutReview = async (data: ReviewPromptData): Promise<AIR
       nextTargets: [],
       exerciseNotes: [],
     };
+  }
+};
+
+function getISOWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+export const generateCoachInsights = async (
+  sessionId: string,
+  session: WorkoutSession,
+  review: AIReview,
+  recentSessions: WorkoutSession[],
+): Promise<void> => {
+  const prompt = `
+You are analyzing a workout and its review to extract coaching insights.
+Be specific and factual. Use real numbers. English only.
+
+CURRENT SESSION:
+- Type: ${session.type} (${session.name})
+- Duration: ${session.durationMinutes} min
+- Volume: ${session.totalVolume}kg
+- Exercises: ${session.exercises.map((e) => e.exerciseName).join(', ')}
+
+REVIEW OUTCOME:
+- Went well: ${review.wentWell.join('; ')}
+- To improve: ${review.toImprove.join('; ')}
+- Exercise notes: ${review.exerciseNotes.map((n) => `${n.exerciseName}: ${n.note}`).join('; ')}
+
+RECENT HISTORY (last ${recentSessions.length} sessions):
+${recentSessions
+  .map((s) => `- ${s.name} on ${s.finishedAt.slice(0, 10)}: ${s.totalVolume}kg total`)
+  .join('\n')}
+
+Extract coaching insights. Respond ONLY in JSON, no markdown, no backticks:
+{
+  "summary": "3-5 sentences about this athlete's current state, trends, and what to watch.",
+  "keyFindings": [
+    "Specific finding 1 with numbers if possible",
+    "Specific finding 2",
+    "Specific finding 3"
+  ]
+}
+
+Rules:
+- keyFindings: 3-5 items max, each under 12 words
+- summary: factual, no fluff, reference real numbers
+- English only
+`;
+
+  try {
+    const res = await fetch('/api/anthropic', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) return;
+
+    const rawJson = await res.json().catch(() => ({}));
+    const content = (rawJson as { content?: { type: string; text?: string }[] }).content;
+    const textBlock = content?.find((c) => c.type === 'text');
+    const rawText = textBlock?.text ?? '';
+    const clean = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(clean) as { summary?: string; keyFindings?: string[] };
+
+    const entry: CoachMemoryEntry = {
+      id: crypto.randomUUID(),
+      sessionId,
+      generatedAt: new Date().toISOString(),
+      weekNumber: getISOWeekNumber(new Date()),
+      summary: parsed.summary ?? '',
+      keyFindings: Array.isArray(parsed.keyFindings) ? parsed.keyFindings : [],
+    };
+
+    await db.coachMemory.add(entry);
+
+    const all = await db.coachMemory.orderBy('generatedAt').toArray();
+    if (all.length > 10) {
+      const toDelete = all.slice(0, all.length - 10).map((e) => e.id);
+      await db.coachMemory.bulkDelete(toDelete);
+    }
+  } catch (err) {
+    console.error('generateCoachInsights failed', err);
   }
 };

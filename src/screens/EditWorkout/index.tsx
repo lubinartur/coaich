@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Check, Minus, Plus, Trash2 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
+import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
 import {
   canonicalExerciseId,
@@ -11,6 +12,7 @@ import {
   summarizeSessionExercise,
 } from '@/services/progressionEngine';
 import type { Exercise, MuscleGroup, SessionExercise, WorkoutSession } from '@/types';
+import { toDisplayName } from '@/utils/toDisplayName';
 import ExercisePicker from '@/screens/Logger/ExercisePicker';
 
 type SetRow = {
@@ -132,6 +134,32 @@ function buildSessionExercises(exercises: EditExercise[]): SessionExercise[] {
   });
 }
 
+/** Local-time `YYYY-MM-DD` for an ISO timestamp; safe `''` fallback when unparsable. */
+function toDateInputValue(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Replace the calendar date of `iso` with `dateStr` (YYYY-MM-DD) while keeping the original time-of-day. */
+function applyDateToIso(dateStr: string, iso: string | undefined): string {
+  const [yStr, mStr, dStr] = dateStr.split('-');
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const day = Number(dStr);
+  const base = iso ? new Date(iso) : new Date();
+  const hours = Number.isNaN(base.getTime()) ? 0 : base.getHours();
+  const minutes = Number.isNaN(base.getTime()) ? 0 : base.getMinutes();
+  const seconds = Number.isNaN(base.getTime()) ? 0 : base.getSeconds();
+  const ms = Number.isNaN(base.getTime()) ? 0 : base.getMilliseconds();
+  const next = new Date(y, m - 1, day, hours, minutes, seconds, ms);
+  return next.toISOString();
+}
+
 async function syncExerciseTargetsFromSession(session: WorkoutSession): Promise<void> {
   for (const ex of session.exercises) {
     const sum = summarizeSessionExercise(ex);
@@ -157,8 +185,10 @@ export interface EditWorkoutScreenProps {
 }
 
 export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWorkoutScreenProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [sessionName, setSessionName] = useState('');
+  const [workoutDate, setWorkoutDate] = useState('');
   const [exercises, setExercises] = useState<EditExercise[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -172,6 +202,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
     }
     setBaseSession(s);
     setSessionName(s.name);
+    setWorkoutDate(toDateInputValue(s.startedAt) || toDateInputValue(s.finishedAt));
     setExercises(await sessionToEditExercises(s));
     setLoading(false);
   }, [sessionId, onClose]);
@@ -222,7 +253,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
   };
 
   const removeExercise = (exIdx: number) => {
-    if (!window.confirm('Remove this exercise from the workout?')) return;
+    if (!window.confirm(t('removeExerciseFromWorkoutConfirm'))) return;
     setExercises((prev) => prev.filter((_, i) => i !== exIdx));
   };
 
@@ -233,21 +264,29 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
 
   const handleSave = async () => {
     if (!baseSession || exercises.length === 0) {
-      window.alert('Add at least one exercise.');
+      window.alert(t('addAtLeastOneExercise'));
       return;
     }
     for (const ex of exercises) {
       if (ex.sets.length === 0) {
-        window.alert(`"${ex.name}" needs at least one set.`);
+        window.alert(t('exerciseNeedsAtLeastOneSet').replace('{{name}}', ex.name));
         return;
       }
     }
 
     const built = buildSessionExercises(exercises);
     const totalVolume = computeTotalVolume(exercises);
+    const nextStartedAt = workoutDate
+      ? applyDateToIso(workoutDate, baseSession.startedAt)
+      : baseSession.startedAt;
+    const nextFinishedAt = workoutDate
+      ? applyDateToIso(workoutDate, baseSession.finishedAt)
+      : baseSession.finishedAt;
     const updated: WorkoutSession = {
       ...baseSession,
       name: sessionName.trim() || baseSession.name,
+      startedAt: nextStartedAt,
+      finishedAt: nextFinishedAt,
       exercises: built,
       totalVolume,
     };
@@ -259,14 +298,14 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
       onSave();
     } catch (e) {
       console.error('[EditWorkout] save', e);
-      window.alert('Could not save changes.');
+      window.alert(t('couldNotSaveChanges'));
     } finally {
       setSaving(false);
     }
   };
 
   const tryClose = () => {
-    if (window.confirm('Discard changes?')) {
+    if (window.confirm(t('discardChangesConfirm'))) {
       onClose();
     }
   };
@@ -274,7 +313,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
   if (loading) {
     return (
       <div className="flex min-h-screen w-full flex-col bg-bg px-5 pt-10">
-        <p className="text-sm text-text-secondary">Loading workout…</p>
+        <p className="text-sm text-text-secondary">{t('loading')}</p>
       </div>
     );
   }
@@ -293,47 +332,59 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
             type="button"
             onClick={tryClose}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-primary transition-colors active:scale-[0.98]"
-            aria-label="Back"
+            aria-label={t('back')}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold leading-tight text-text-primary">Edit Workout</h2>
-            <p className="mt-0.5 text-xs text-text-secondary">{sessionName}</p>
+            <h1 className="text-lg font-bold leading-tight text-text-primary">{t('editWorkout')}</h1>
+            <p className="mt-0.5 text-xs text-text-secondary">{toDisplayName(sessionName)}</p>
           </div>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 pb-32 no-scrollbar">
+        <div>
+          <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+            {t('whenWasThisWorkout')}
+          </label>
+          <input
+            type="date"
+            value={workoutDate}
+            onChange={(e) => setWorkoutDate(e.target.value)}
+            className="w-full rounded-xl border border-border bg-surface px-4 py-3 font-mono text-sm text-text-primary outline-none transition-colors focus:border-accent"
+            style={{ colorScheme: 'dark' }}
+          />
+        </div>
+
         {exercises.map((ex, exIdx) => {
           const isBw = ex.equipment === 'bodyweight';
           const isPlank = isPlankExerciseName(ex.name);
           return (
           <Card key={`${ex.exerciseId}-${exIdx}`} className="border-border">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="text-lg font-bold text-text-primary">{ex.name}</h3>
+              <h3 className="text-lg font-bold text-text-primary">{toDisplayName(ex.name)}</h3>
               <button
                 type="button"
                 onClick={() => removeExercise(exIdx)}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors hover:border-red-500/40 hover:text-red-400"
-                aria-label="Remove exercise"
+                aria-label={t('removeExerciseAria')}
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-4 w-4 text-red-500" />
               </button>
             </div>
-            <p className="mt-2 text-[11px] text-text-secondary">Adjust sets below. Check off completed sets for volume.</p>
 
             <div className="mt-4 flex flex-col gap-2">
               {ex.sets.map((set, setIdx) => (
                 <div key={set.id} className="flex items-center gap-2">
-                  <span className="w-11 shrink-0 text-[10px] font-bold text-text-secondary">SET {setIdx + 1}</span>
+                  <span className="w-11 shrink-0 text-[10px] font-bold text-text-secondary">{setIdx + 1}</span>
                   {!isBw ? (
                     <>
                       <input
                         type="text"
                         inputMode="decimal"
                         autoComplete="off"
-                        placeholder="kg"
+                        placeholder={t('weightPlaceholderInput')}
                         className={inputClass}
                         value={set.weight}
                         onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value)}
@@ -346,7 +397,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
                     type="text"
                     inputMode="numeric"
                     autoComplete="off"
-                    placeholder={isPlank ? 'sec' : 'reps'}
+                    placeholder={isPlank ? t('secPlaceholderInput') : t('repsPlaceholderInput')}
                     className={`${inputClass} ${isBw ? 'flex-1' : ''}`}
                     value={set.reps}
                     onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
@@ -354,7 +405,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
                   />
                   <button
                     type="button"
-                    aria-label={set.completed ? 'Uncomplete set' : 'Complete set'}
+                    aria-label={set.completed ? t('uncompleteSet') : t('completeSet')}
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
                       set.completed
                         ? 'border-accent bg-accent text-white'
@@ -369,7 +420,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
                     disabled={ex.sets.length <= 1}
                     onClick={() => removeSet(exIdx, setIdx)}
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors enabled:hover:border-red-500/40 enabled:hover:text-red-400 disabled:opacity-30"
-                    aria-label="Remove set"
+                    aria-label={t('removeSetAria')}
                   >
                     <Minus className="h-5 w-5" />
                   </button>
@@ -377,16 +428,15 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
               ))}
             </div>
 
-            <div className="mt-3">
-              <Button
+            <div className="flex gap-3 pt-2">
+              <button
                 type="button"
-                variant="secondary"
-                size="sm"
                 onClick={() => addSet(exIdx)}
-                className="border border-border/50 bg-transparent px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-none hover:bg-surface/50 hover:text-text-primary"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#222222] bg-[#111111] py-3.5 text-xs font-semibold text-[#6B7280] transition-all hover:bg-[#181818] hover:border-[#8B5CF6]/25 hover:text-[#8B5CF6] active:scale-[0.98]"
               >
-                + ADD SET
-              </Button>
+                <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                {t('addSetLabel')}
+              </button>
             </div>
           </Card>
           );
@@ -395,10 +445,14 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
 
       <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex flex-col justify-end gap-0 border-t border-border bg-bg/95 backdrop-blur-md">
         <div className="pointer-events-auto mx-auto flex w-full max-w-[390px] flex-col gap-2 px-5 py-4">
-          <Button type="button" variant="dark" size="md" className="w-full" onClick={() => setPickerOpen(true)}>
-            <Plus className="h-4 w-4 shrink-0" aria-hidden />
-            + Add Exercise
-          </Button>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#2A2A2A] bg-[#1C1C1C] py-5 text-sm font-bold text-white transition-colors hover:border-[#8B5CF6]/40"
+          >
+            <Plus className="h-[18px] w-[18px] shrink-0" aria-hidden />
+            {t('addExercise')}
+          </button>
           <Button
             type="button"
             variant="primary"
@@ -407,7 +461,7 @@ export default function EditWorkoutScreen({ sessionId, onSave, onClose }: EditWo
             disabled={saving || exercises.length === 0}
             onClick={() => void handleSave()}
           >
-            Save Changes
+            {t('save')}
           </Button>
         </div>
       </div>

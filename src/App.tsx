@@ -5,7 +5,7 @@ import {
   WORKOUT_PROGRAM_TEMPLATES,
   type LoggerTemplateExercise,
 } from '@/constants/workoutPrograms';
-import { db, hasProfile, seedExercisesIfEmpty } from '@/services/db';
+import { db, hasProfile, seedExercisesIfEmpty, seedProgramsIfEmpty } from '@/services/db';
 import OnboardingScreen from '@/screens/Onboarding';
 import LoggerScreen from '@/screens/Logger';
 import RatingScreen from '@/screens/Rating';
@@ -52,6 +52,7 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       await seedExercisesIfEmpty();
+      await seedProgramsIfEmpty();
       const exists = await hasProfile();
       setNeedsOnboarding(!exists);
       setBooting(false);
@@ -60,8 +61,8 @@ export default function App() {
 
   if (booting) {
     return (
-      <div className="flex min-h-screen justify-center bg-bg">
-        <div className="flex w-full max-w-[390px] items-center justify-center border-x border-border">
+      <div className="flex min-h-screen justify-center">
+        <div className="safe-top-shell flex w-full max-w-[390px] items-center justify-center border-x border-border">
           <div className="h-8 w-8 animate-pulse rounded-full border-2 border-border border-t-accent" aria-hidden />
         </div>
       </div>
@@ -70,8 +71,8 @@ export default function App() {
 
   if (needsOnboarding) {
     return (
-      <div className="flex min-h-screen justify-center bg-bg">
-        <div className="relative min-h-screen w-full max-w-[390px] overflow-hidden border-x border-border shadow-2xl">
+      <div className="flex min-h-screen justify-center">
+        <div className="safe-top-shell relative min-h-screen w-full max-w-[390px] overflow-hidden border-x border-border shadow-2xl">
           <OnboardingScreen
             onComplete={() => {
               setNeedsOnboarding(false);
@@ -84,8 +85,8 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen justify-center bg-bg">
-      <div className="relative flex min-h-screen w-full max-w-[390px] flex-col overflow-hidden border-x border-border bg-bg shadow-2xl">
+    <div className="flex min-h-screen justify-center">
+      <div className="safe-top-shell relative flex min-h-screen w-full max-w-[390px] flex-col overflow-hidden border-x border-border shadow-2xl">
         {overlay === 'import' ? (
           <ImportScreen
             onBack={() => {
@@ -207,10 +208,6 @@ export default function App() {
               {tab === 'history' && (
                 <HistoryScreen
                   refreshKey={historyRefreshKey}
-                  onEditWorkout={(sessionId) => {
-                    setEditContext({ sessionId, returnTo: 'history' });
-                    setOverlay('editWorkout');
-                  }}
                   onSelectWorkout={({ sessionId, workoutName, workoutDate }) => {
                     setActiveSessionId(sessionId);
                     setReviewBackTab('history');

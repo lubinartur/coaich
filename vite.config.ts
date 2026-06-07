@@ -21,10 +21,15 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api/anthropic': {
-          target: 'https://api.anthropic.com',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/anthropic/, ''),
-        },
+  target: 'https://api.anthropic.com',
+  changeOrigin: true,
+  rewrite: (_path) => '/v1/messages',
+  headers: {
+    'x-api-key': env.VITE_ANTHROPIC_API_KEY ?? '',
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  },
+},
       },
     },
   };
