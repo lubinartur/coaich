@@ -1,7 +1,9 @@
-import { motion } from 'motion/react';
-import { ArrowLeftRight, Check, CheckCircle2, GripVertical, Minus, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { ArrowLeftRight, Check, CheckCircle2, GripVertical, Minus, Plus, Trash2, X } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { getExerciseGif } from '@/services/exerciseGifService';
 import { getRecLastLayout, type ProgressionStatus } from '@/services/progressionEngine';
 import type { MuscleGroup } from '@/types';
 import { toDisplayName } from '@/utils/toDisplayName';
@@ -70,6 +72,40 @@ export default function SortableExercise({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sortableId,
   });
+
+  const [gifUrl, setGifUrl] = useState<string | null>(null);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [gifFetched, setGifFetched] = useState(false);
+  const [gifFullscreen, setGifFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!expanded || gifFetched) return;
+    let cancelled = false;
+    setGifLoading(true);
+    void getExerciseGif(ex.name)
+      .then((url) => {
+        if (cancelled) return;
+        setGifUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setGifUrl(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setGifLoading(false);
+        setGifFetched(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, gifFetched, ex.name]);
+
+  // A swap replaces the exercise in place (same React key) — reset so the new exercise re-resolves.
+  useEffect(() => {
+    setGifUrl(null);
+    setGifFetched(false);
+    setGifFullscreen(false);
+  }, [ex.exerciseId]);
   const dragStyle = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -125,7 +161,8 @@ export default function SortableExercise({
     ) : null;
 
   return (
-    <div ref={setNodeRef} style={dragStyle}>
+    <>
+      <div ref={setNodeRef} style={dragStyle}>
       <section
         className={`overflow-hidden rounded-2xl border bg-[#141414] transition-opacity ${
           collapsedDimmed ? 'border-[#2A2A2A]/70 opacity-65' : 'border-[#222222] opacity-100'
@@ -197,6 +234,26 @@ export default function SortableExercise({
                   {expandedMeta}
                 </div>
               </button>
+              {gifLoading ? (
+                <div className="h-[112px] w-[112px] shrink-0 animate-pulse rounded-xl bg-[#1C1C1C]" aria-hidden />
+              ) : gifUrl ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setGifFullscreen(true);
+                  }}
+                  className="h-[112px] w-[112px] shrink-0 overflow-hidden rounded-xl border border-[#222222] bg-white transition-transform active:scale-95"
+                  aria-label={toDisplayName(ex.name)}
+                >
+                  <img
+                    src={gifUrl}
+                    alt={toDisplayName(ex.name)}
+                    loading="lazy"
+                    className="h-full w-full object-contain"
+                  />
+                </button>
+              ) : null}
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
@@ -334,6 +391,39 @@ export default function SortableExercise({
           </>
         )}
       </section>
-    </div>
+      </div>
+
+      <AnimatePresence>
+        {gifFullscreen && gifUrl ? (
+          <motion.div
+            key="gif-fullscreen"
+            className="fixed inset-0 z-[90] flex items-center justify-center p-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setGifFullscreen(false)}
+          >
+            <div className="absolute inset-0 bg-black/85 backdrop-blur-sm" aria-hidden />
+            <button
+              type="button"
+              onClick={() => setGifFullscreen(false)}
+              aria-label={t('close')}
+              className="absolute right-5 top-[calc(env(safe-area-inset-top)+16px)] z-10 flex h-10 w-10 items-center justify-center rounded-full border border-[#2A2A2A] bg-[#1C1C1C] text-white"
+            >
+              <X className="h-5 w-5" aria-hidden />
+            </button>
+            <motion.img
+              src={gifUrl}
+              alt={toDisplayName(ex.name)}
+              className="relative z-0 max-h-[80vh] w-auto max-w-full rounded-2xl bg-white object-contain"
+              initial={{ scale: 0.92 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.92 }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </>
   );
 }
