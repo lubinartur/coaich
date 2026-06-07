@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Dumbbell, MessageCircle, Send, Sparkles, X, Zap } from 'lucide-react';
+import { ArrowRight, Dumbbell, MessageCircle, Pencil, Send, Sparkles, X, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   WORKOUT_PROGRAM_TEMPLATES,
@@ -165,6 +165,7 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   const [coachMessageExpanded, setCoachMessageExpanded] = useState(false);
   const [expandedExerciseIds, setExpandedExerciseIds] = useState<string[]>([]);
   const [programsWithNext, setProgramsWithNext] = useState<ProgramWithNext[]>([]);
+  const [dayPicker, setDayPicker] = useState<ProgramWithNext | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [recovery, setRecovery] = useState<RecoveryScore | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -266,11 +267,29 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
   };
 
   const startProgramDay = (day: ProgramDay) => {
+    setDayPicker(null);
     onStartWorkout?.({
       workoutName: day.dayName,
       workoutType: day.type,
       exerciseTemplate: templateForProgramDay(day),
       openExercisePickerOnMount: false,
+    });
+  };
+
+  const handleProgramTap = (entry: ProgramWithNext) => {
+    if (entry.program.days.length > 1) {
+      setDayPicker(entry);
+    } else {
+      startProgramDay(entry.nextDay);
+    }
+  };
+
+  const startCustomWorkout = () => {
+    onStartWorkout?.({
+      workoutName: 'Custom',
+      workoutType: 'custom',
+      exerciseTemplate: [],
+      openExercisePickerOnMount: true,
     });
   };
 
@@ -835,43 +854,135 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
       </section>
 
       {/* Programs — loaded from db.programs (seeded from PRESET_PROGRAMS). */}
-      {programsWithNext.length > 0 ? (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
-              {t('tacticalTemplates')}
-            </h3>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {programsWithNext.map(({ program, nextDay }, idx) => (
-              <button
-                key={program.id}
-                type="button"
-                onClick={() => startProgramDay(nextDay)}
-                className={`relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-[#222222] p-5 text-left transition-all active:scale-[0.98] ${
-                  idx === 0 ? 'bg-[#181818]' : 'bg-[#111111]'
-                }`}
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#222222]" aria-hidden>
-                  <Dumbbell className="h-5 w-5 text-[#8B5CF6]" />
+      <section className="space-y-4">
+        <div className="flex items-center justify-between px-2">
+          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+            {t('tacticalTemplates')}
+          </h3>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {programsWithNext.map(({ program, nextDay }, idx) => (
+            <button
+              key={program.id}
+              type="button"
+              onClick={() => handleProgramTap({ program, nextDay })}
+              className={`relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-[#222222] p-5 text-left transition-all active:scale-[0.98] ${
+                idx === 0 ? 'bg-[#181818]' : 'bg-[#111111]'
+              }`}
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#222222]" aria-hidden>
+                <Dumbbell className="h-5 w-5 text-[#8B5CF6]" />
+              </span>
+              <div className="relative z-10">
+                <span className="block text-lg font-black tracking-tight text-white">
+                  {program.name}
                 </span>
-                <div className="relative z-10">
-                  <span className="block text-lg font-black tracking-tight text-white">
-                    {program.name}
+                <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
+                  {t('nextDay').toUpperCase()}: {nextDay.dayName}
+                </span>
+              </div>
+              <Dumbbell
+                className="pointer-events-none absolute -bottom-2 -right-2 h-[60px] w-[60px] rotate-12 scale-150 opacity-10 grayscale"
+                aria-hidden
+              />
+            </button>
+          ))}
+
+          {/* Custom workout — empty Logger with picker */}
+          <button
+            key="custom-workout"
+            type="button"
+            onClick={startCustomWorkout}
+            className="relative flex flex-col items-start gap-4 overflow-hidden rounded-[24px] border border-dashed border-[#8B5CF6]/35 bg-[#111111] p-5 text-left transition-all active:scale-[0.98]"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#8B5CF6]/15" aria-hidden>
+              <Pencil className="h-5 w-5 text-[#8B5CF6]" />
+            </span>
+            <div className="relative z-10">
+              <span className="block text-lg font-black tracking-tight text-white">{t('custom')}</span>
+              <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
+                {t('pickExercises')}
+              </span>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      {/* Program day picker — bottom sheet for multi-day programs */}
+      <AnimatePresence>
+        {dayPicker ? (
+          <motion.div
+            key="day-picker"
+            className="fixed inset-0 z-[70] flex flex-col justify-end"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <button
+              type="button"
+              aria-label={t('close')}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setDayPicker(null)}
+            />
+            <motion.div
+              className="relative z-10 mx-auto flex max-h-[85vh] w-full max-w-[430px] flex-col rounded-t-3xl border-t border-[#222222] bg-[#111111] shadow-[0_-12px_48px_-12px_rgba(0,0,0,0.8)]"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+            >
+              <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[#2A2A2A]" aria-hidden />
+              <header className="flex shrink-0 items-center justify-between px-5 py-4">
+                <div className="min-w-0">
+                  <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[#6B7280]">
+                    {t('chooseDay')}
                   </span>
-                  <span className="mt-0.5 block text-[10px] font-medium tracking-wider text-[#6B7280]">
-                    {t('nextDay').toUpperCase()}: {nextDay.dayName}
+                  <span className="block truncate text-lg font-black tracking-tight text-white">
+                    {dayPicker.program.name}
                   </span>
                 </div>
-                <Dumbbell
-                  className="pointer-events-none absolute -bottom-2 -right-2 h-[60px] w-[60px] rotate-12 scale-150 opacity-10 grayscale"
-                  aria-hidden
-                />
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : null}
+                <button
+                  type="button"
+                  onClick={() => setDayPicker(null)}
+                  aria-label={t('close')}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#222222] bg-[#1C1C1C] text-[#6B7280] transition-colors hover:text-white"
+                >
+                  <X className="h-5 w-5" aria-hidden />
+                </button>
+              </header>
+              <div
+                className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-6 pt-1 no-scrollbar"
+                style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+              >
+                {dayPicker.program.days.map((day, i) => {
+                  const isNext = day.dayName === dayPicker.nextDay.dayName;
+                  return (
+                    <button
+                      key={`${day.dayName}-${i}`}
+                      type="button"
+                      onClick={() => startProgramDay(day)}
+                      className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-4 text-left transition-colors ${
+                        isNext
+                          ? 'border-[#8B5CF6]/40 bg-[#8B5CF6]/10'
+                          : 'border-[#222222] bg-[#181818] hover:border-[#8B5CF6]/30'
+                      }`}
+                    >
+                      <span className="min-w-0 truncate text-base font-bold text-white">{day.dayName}</span>
+                      {isNext ? (
+                        <span className="shrink-0 rounded-full border border-[#8B5CF6]/40 bg-[#8B5CF6]/20 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-[#8B5CF6]">
+                          {t('nextDay')}
+                        </span>
+                      ) : (
+                        <ArrowRight className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* Coach chat — bottom sheet */}
       <AnimatePresence>

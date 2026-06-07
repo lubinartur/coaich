@@ -220,6 +220,8 @@ export const translations = {
     recoveryLow: 'Rest needed',
     coachReasonLabel: 'REASON',
     coachTargetsLabel: 'TARGETS',
+    pickExercises: 'Pick exercises',
+    chooseDay: 'Choose day',
   },
   ru: {
     today: 'Сегодня',
@@ -442,6 +444,8 @@ export const translations = {
     recoveryLow: 'Нужен отдых',
     coachReasonLabel: 'ПРИЧИНА',
     coachTargetsLabel: 'ЦЕЛИ',
+    pickExercises: 'Выбери упражнения',
+    chooseDay: 'Выбери день',
   },
 } as const;
 

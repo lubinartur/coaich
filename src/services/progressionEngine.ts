@@ -774,14 +774,28 @@ export async function getExerciseTarget(
 
     const prevSession = sessions[1];
     const gapDays = daysBetweenSessions(lastSession.finishedAt, prevSession.finishedAt);
-    if (gapDays > 14) {
-      const gapPick = await withRoundedWeight(exerciseId, lastPerf);
+
+    const profile = await getProfile();
+    const effectiveGoal = profile?.goal ?? goal;
+
+    if (gapDays >= 8) {
+      // Long layoff: scale load back so the return session is safe, deeper cut for longer gaps.
+      let factor: number;
+      let gapReps = lastPerf.reps;
+      if (gapDays > 21) {
+        factor = 0.7;
+        gapReps = repRangeForGoal(effectiveGoal).min;
+      } else if (gapDays >= 15) {
+        factor = 0.8;
+      } else {
+        factor = 0.9;
+      }
+      const gapWeight = await roundWeightByExerciseEquipment(exerciseId, lastPerf.weight * factor);
+      const gapPick = { weight: gapWeight, reps: gapReps, sets: lastPerf.sets };
       if (persist) await persistTarget(exerciseId, gapPick);
       return { ...gapPick, source: 'progression_engine', progressionStatus: 'gap_detected' };
     }
 
-    const profile = await getProfile();
-    const effectiveGoal = profile?.goal ?? goal;
     const prevEx = getSessionExercise(prevSession, exerciseId);
     const prevPerf = prevEx ? summarizeSessionExercise(prevEx) : null;
     const prevAvgReps =

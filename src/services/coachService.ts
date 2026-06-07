@@ -627,6 +627,14 @@ function mergeDeloadReasoning(deload: DeloadCheckResult, activeReasoning: string
   return composeReasoning([headline, activeReasoning]);
 }
 
+/** Localized heads-up that load is being scaled back after a long layoff (>= 8 days). */
+function longBreakNote(profile: Profile, daysSinceLast: number): string {
+  const days = Math.max(8, Math.round(daysSinceLast));
+  return profile.language === 'ru'
+    ? `Перерыв ${days} дней. Снижаем нагрузку для безопасного возврата.`
+    : `${days} day break detected. Reducing load for safe return.`;
+}
+
 export async function getWorkoutRecommendation(profile: Profile): Promise<WorkoutRecommendation> {
   const now = new Date();
   const deload = await checkDeloadNeeded(profile, now);
@@ -635,6 +643,8 @@ export async function getWorkoutRecommendation(profile: Profile): Promise<Workou
   const last = lastFive[0];
   const prev = lastFive[1];
   const hoursSinceLast = last ? hoursSince(last.finishedAt, now) : Number.POSITIVE_INFINITY;
+  const daysSinceLast = hoursSinceLast / 24;
+  const breakNote = last && daysSinceLast >= 8 ? longBreakNote(profile, daysSinceLast) : '';
 
   if (last && hoursSinceLast < 8) {
     const train = await recommendActiveWorkout(profile, now, last, prev);
@@ -651,12 +661,14 @@ export async function getWorkoutRecommendation(profile: Profile): Promise<Workou
 
   const active = await recommendActiveWorkout(profile, now, last, prev);
   if (!deload.deloadNeeded) {
-    return active;
+    return breakNote
+      ? { ...active, reasoning: composeReasoning([breakNote, active.reasoning]) }
+      : active;
   }
 
   return {
     ...active,
-    reasoning: mergeDeloadReasoning(deload, active.reasoning),
+    reasoning: composeReasoning([breakNote, mergeDeloadReasoning(deload, active.reasoning)]),
     isDeload: true,
     deloadConsecutiveWeeks: deload.consecutiveWeeks,
   };
