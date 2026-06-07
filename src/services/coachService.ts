@@ -12,6 +12,7 @@ export interface CoachPromptData {
   hoursSinceLast: number;
   recommendation: { type: string; name: string; reasoning: string };
   weeklyVolume: Record<string, number>;
+  exerciseTargets?: Array<{ exerciseName: string; weight: number; reps: number; sets: number }>;
   memoryFindings?: string[];
 }
 
@@ -76,6 +77,11 @@ WEEKLY VOLUME STATUS:
 ${Object.entries(data.weeklyVolume)
   .map(([muscle, sets]) => `${muscle}: ${sets} sets`)
   .join(', ')}
+
+EXERCISE TARGETS FOR TODAY:
+${data.exerciseTargets && data.exerciseTargets.length > 0
+  ? data.exerciseTargets.map((t) => `${t.exerciseName}: ${t.weight}kg × ${t.reps} × ${t.sets} sets`).join('\n')
+  : 'No targets yet'}
 ${data.memoryFindings && data.memoryFindings.length > 0
   ? `
 ATHLETE MEMORY (patterns from recent sessions):
@@ -93,7 +99,9 @@ Reason:
 Targets:
 - [Exercise name]: [weight]×[reps]×[sets]
 - [Exercise name]: [weight]×[reps]×[sets]
-(show max 3 key exercises from the recommendation)
+
+Targets: list the actual targets provided above (EXERCISE TARGETS FOR TODAY), not estimates. Show max 3 key exercises.
+If no targets available, skip the Targets section entirely.
 
 Keep each bullet under 10 words. No fluff. Be direct.
 If athlete has injuries, reflect relevant modifications in the reasons.
@@ -180,6 +188,7 @@ function countWeeklySetsByMuscleGroup(sessions: WorkoutSession[], now: Date): Re
 export async function buildCoachPromptData(
   profile: Profile,
   recommendation: WorkoutRecommendation,
+  exerciseTargets?: CoachPromptData['exerciseTargets'],
 ): Promise<CoachPromptData> {
   const now = new Date();
   const weekStartIso = startOfWeekMonday(now).toISOString();
@@ -198,6 +207,7 @@ export async function buildCoachPromptData(
       reasoning: recommendation.reasoning,
     },
     weeklyVolume,
+    exerciseTargets,
   };
 }
 

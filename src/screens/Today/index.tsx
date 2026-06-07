@@ -366,10 +366,30 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         const recommendation = await getWorkoutRecommendation(profile);
         if (cancelled) return;
 
+        const coachTemplateKey = recommendation.workoutType ?? recommendation.trainAnywayType ?? null;
+        const loadCoachExerciseTargets = async (templateKey: RecommendedWorkoutType) => {
+          const exercises = WORKOUT_PROGRAM_TEMPLATES[templateKey];
+          const targets: Array<{ exerciseName: string; weight: number; reps: number; sets: number }> = [];
+          for (const ex of exercises) {
+            try {
+              const cid = canonicalExerciseId(ex.exerciseId);
+              let stored = await db.exerciseTargets.get(cid);
+              if (!stored && ex.exerciseId !== cid) stored = await db.exerciseTargets.get(ex.exerciseId);
+              if (stored) {
+                targets.push({ exerciseName: ex.name, weight: stored.weight, reps: stored.reps, sets: stored.sets });
+              }
+            } catch (err) {
+              console.error('[Today] coach target load error', ex.exerciseId, err);
+            }
+          }
+          return targets;
+        };
+
         setCoachAiLoading(true);
         void (async () => {
           try {
-            const data = await buildCoachPromptData(profile, recommendation);
+            const targets = coachTemplateKey ? await loadCoachExerciseTargets(coachTemplateKey) : [];
+            const data = await buildCoachPromptData(profile, recommendation, targets);
             const msg = await generateCoachMessage(data);
             if (!cancelled) setCoachAiMessage(msg);
           } finally {
