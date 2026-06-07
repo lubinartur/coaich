@@ -287,18 +287,21 @@ export default function SortableExercise({
                       />
                     </div>
                     <div className="flex min-w-0 items-center justify-end gap-0.5">
-                      <button
+                      <motion.button
                         type="button"
                         aria-label={set.completed ? t('uncompleteSet') : t('completeSet')}
-                        className={`flex min-h-[64px] w-[52px] shrink-0 items-center justify-center rounded-xl border shadow-lg transition-all ${
+                        className={`flex min-h-[64px] w-[52px] shrink-0 items-center justify-center rounded-xl border shadow-lg transition-colors ${
                           set.completed
                             ? 'border-[#22C55E] bg-[#22C55E] text-white shadow-[#22C55E]/20'
                             : 'border-[#222222] bg-[#111111] text-[#333333] hover:border-[#8B5CF6]'
                         }`}
                         onClick={() => toggleSetComplete(exIdx, setIdx)}
+                        whileTap={{ scale: 0.9 }}
+                        animate={{ scale: set.completed ? [1, 1.25, 1] : 1 }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
                       >
                         <Check className="h-6 w-6" strokeWidth={4} />
-                      </button>
+                      </motion.button>
                       {canRemoveSet ? (
                         <button
                           type="button"

@@ -1,6 +1,7 @@
 import type { Exercise, PrRecord, WorkoutSession } from '@/types';
 import { epley1RM } from '@/services/progressMetrics';
 import { canonicalExerciseId } from '@/services/progressionEngine';
+import { db } from '@/services/db';
 
 export function estimate1RM(weight: number, reps: number): number {
   return epley1RM(weight, reps);
@@ -84,6 +85,27 @@ export function isSetPersonalRecord(
   const hist = maxHistoricalStrengthMetric(sessions, ex.exerciseId, ex.equipment);
   const same = maxSameWorkoutOtherSetsMetric(exercises, exIdx, setIdx);
   return cur > Math.max(hist, same);
+}
+
+/**
+ * True when `weight` is strictly greater than the max completed weight ever logged
+ * for this exercise across stored sessions (weight-only PR, ignores reps/1RM).
+ */
+export async function checkIfPR(exerciseId: string, weight: number): Promise<boolean> {
+  if (!Number.isFinite(weight) || weight <= 0) return false;
+  const cid = canonicalExerciseId(exerciseId);
+  const sessions = await db.workoutSessions.toArray();
+  let maxWeight = 0;
+  for (const s of sessions) {
+    for (const ex of s.exercises) {
+      if (canonicalExerciseId(ex.exerciseId) !== cid) continue;
+      for (const st of ex.sets) {
+        if (!st.completed) continue;
+        if (st.weight > maxWeight) maxWeight = st.weight;
+      }
+    }
+  }
+  return weight > maxWeight;
 }
 
 export function buildPrRecordsForSession(

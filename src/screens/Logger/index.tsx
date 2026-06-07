@@ -19,7 +19,12 @@ import { Button, Card } from '@/components/ui';
 import type { LoggerTemplateExercise } from '@/constants/workoutPrograms';
 import { useTranslation } from '@/hooks/useTranslation';
 import { db, getProfile } from '@/services/db';
-import { buildPrRecordsForSession, isSetPersonalRecord } from '@/services/prDetection';
+import {
+  buildPrRecordsForSession,
+  checkIfPR,
+  isSetPersonalRecord,
+  parseLoggerSetWeightReps,
+} from '@/services/prDetection';
 import {
   canonicalExerciseId,
   formatTargetLineForExercise,
@@ -376,7 +381,10 @@ export default function LoggerScreen({
   const [restTick, setRestTick] = useState(0);
   const [restZeroFlash, setRestZeroFlash] = useState(false);
   const restCompleteHandledRef = useRef(false);
-  /** Non-null while a recoverable draft is awaiting the user's restore/discard decision. */
+  const [prBanner, setPrBanner] = useState<{ show: boolean; exerciseName: string; weight: number } | null>(null);
+  /** Weight PRs already celebrated this session (key: canonicalId-weight) so we don't re-trigger. */
+  const prCelebratedRef = useRef<Set<string>>(new Set());
+  /** Non-null while a recoverable draft is awaiting the user's restore/decision. */
   const [restoreDraft, setRestoreDraft] = useState<WorkoutDraft | null>(() => readFreshWorkoutDraft());
   /** Set when a draft is restored so name/type follow the draft rather than the freshly-mounted props. */
   const [restoredMeta, setRestoredMeta] = useState<{ name: string; type: string } | null>(null);
@@ -604,6 +612,29 @@ export default function LoggerScreen({
     });
   }, []);
 
+  const celebratePrIfNeeded = useCallback(
+    async (exIdx: number, setIdx: number) => {
+      const ex = exercises[exIdx];
+      const set = ex?.sets[setIdx];
+      if (!ex || !set || ex.equipment === 'bodyweight') return;
+      const parsed = parseLoggerSetWeightReps(set, ex.equipment);
+      if (!parsed || parsed.weight <= 0) return;
+      const key = `${canonicalExerciseId(ex.exerciseId)}-${parsed.weight}`;
+      if (prCelebratedRef.current.has(key)) return;
+      const isPr = await checkIfPR(ex.exerciseId, parsed.weight);
+      if (!isPr) return;
+      prCelebratedRef.current.add(key);
+      setPrBanner({ show: true, exerciseName: toDisplayName(ex.name), weight: parsed.weight });
+    },
+    [exercises],
+  );
+
+  useEffect(() => {
+    if (!prBanner?.show) return undefined;
+    const id = window.setTimeout(() => setPrBanner(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [prBanner]);
+
   const toggleSetComplete = useCallback(
     (exIdx: number, setIdx: number) => {
       const willComplete = !exercises[exIdx]?.sets[setIdx]?.completed;
@@ -625,9 +656,10 @@ export default function LoggerScreen({
       if (willComplete) {
         startRestTimer();
         void runPrCheck(exIdx, setIdx);
+        void celebratePrIfNeeded(exIdx, setIdx);
       }
     },
-    [exercises, runPrCheck, startRestTimer],
+    [exercises, runPrCheck, startRestTimer, celebratePrIfNeeded],
   );
 
   function updateSet(
@@ -807,8 +839,39 @@ export default function LoggerScreen({
   const restoreLabel = lang === 'ru' ? 'Восстановить' : 'Restore';
   const startFreshLabel = lang === 'ru' ? 'Начать заново' : 'Start fresh';
 
+  const prWeightStr = prBanner
+    ? Number.isInteger(prBanner.weight)
+      ? String(prBanner.weight)
+      : prBanner.weight.toFixed(1).replace(/\.0$/, '')
+    : '';
+  const prBannerText = prBanner
+    ? lang === 'ru'
+      ? `Личный рекорд! ${prBanner.exerciseName} — ${prWeightStr}${t('kgUnit')}`
+      : `Personal Record! ${prBanner.exerciseName} — ${prWeightStr}${t('kgUnit')}`
+    : '';
+
   return (
     <div className="flex min-h-screen w-full flex-col bg-[#0A0A0A] pt-1">
+      <AnimatePresence>
+        {prBanner?.show ? (
+          <motion.div
+            key="pr-banner"
+            initial={{ y: -24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -24, opacity: 0 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+            className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+12px)] z-[80] w-[calc(100%-2rem)] max-w-[360px] -translate-x-1/2"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-[#F59E0B]/50 bg-gradient-to-r from-[#F59E0B] to-[#FBBF24] px-5 py-3 text-center text-sm font-black text-[#1A1206] shadow-[0_14px_44px_-10px_rgba(245,158,11,0.65)]">
+              <span aria-hidden>🏆</span>
+              <span className="min-w-0">{prBannerText}</span>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
       <ExercisePicker
         open={pickerOpen}
         onClose={closePicker}
