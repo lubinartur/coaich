@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowUpRight, TrendingDown, TrendingUp } from 'lucide-react';
+import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { Card } from '@/components/ui';
 import { useTranslation } from '@/hooks/useTranslation';
 import { db } from '@/services/db';
@@ -16,6 +17,7 @@ import {
   splitAverage1RM,
   type SplitKey,
   volumeRowsForUi,
+  weightProgressionSeries,
 } from '@/services/progressMetrics';
 import type { WorkoutSession } from '@/types';
 
@@ -45,10 +47,56 @@ function formatPct(p: number | null): string {
   return `${sign}${p.toFixed(1)}%`;
 }
 
+function formatChartWeight(w: number): string {
+  return Number.isInteger(w) ? String(w) : (Math.round(w * 10) / 10).toString();
+}
+
+function ProgressionChart({ data }: { data: { label: string; weight: number }[] }) {
+  const weights = data.map((d) => d.weight);
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  const pad = Math.max(2.5, (max - min) * 0.2);
+  const domainMin = Math.max(0, Math.floor(min - pad));
+  const domainMax = Math.ceil(max + pad);
+  return (
+    <div className="h-[120px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: -12 }}>
+          <XAxis
+            dataKey="label"
+            tick={{ fill: '#6B7280', fontSize: 10 }}
+            tickLine={false}
+            axisLine={false}
+            minTickGap={20}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            domain={[domainMin, domainMax]}
+            tick={{ fill: '#6B7280', fontSize: 10 }}
+            tickLine={false}
+            axisLine={false}
+            width={34}
+            allowDecimals={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="weight"
+            stroke="#8B5CF6"
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: '#8B5CF6', strokeWidth: 0 }}
+            activeDot={{ r: 4, fill: '#8B5CF6', strokeWidth: 0 }}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 const SATURATION_KEYS = ['chest', 'back', 'shoulders', 'legs'] as const;
 
 export default function ProgressScreen() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -122,6 +170,12 @@ export default function ProgressScreen() {
     const volumeRows = volumeRowsForUi(sessions, thisStart, thisEnd);
     const maxVol = Math.max(1, ...volumeRows.map((r) => r.sets));
 
+    const charts = BENCHMARK_LIFT_DEFS.map(({ label, exerciseId }) => ({
+      label,
+      exerciseId,
+      series: weightProgressionSeries(sessions, exerciseId, 10),
+    })).filter((c) => c.series.length >= 2);
+
     return {
       thisOverall,
       prevOverall,
@@ -130,6 +184,7 @@ export default function ProgressScreen() {
       benchmarks,
       volumeRows,
       maxVol,
+      charts,
     };
   }, [sessions]);
 
@@ -160,7 +215,7 @@ export default function ProgressScreen() {
     );
   }
 
-  const { thisOverall, overallPct, splits, benchmarks, volumeRows, maxVol } = metrics;
+  const { thisOverall, overallPct, splits, benchmarks, volumeRows, maxVol, charts } = metrics;
   const benchmarksWithData = benchmarks.filter((b) => b.displayKg > 0);
 
   const overallTrendUp = overallPct !== null && overallPct > 0;
@@ -329,6 +384,52 @@ export default function ProgressScreen() {
           })}
         </div>
       </section>
+
+      {charts.length > 0 ? (
+        <section className="space-y-6">
+          <h3 className="text-left text-sm font-black uppercase tracking-widest text-[#6B7280]">
+            {t('progressionTrend')}
+          </h3>
+          <div className="flex flex-col gap-6">
+            {charts.map((c) => {
+              const first = c.series[0].weight;
+              const last = c.series[c.series.length - 1].weight;
+              const delta = last - first;
+              const tone =
+                delta > 0 ? 'text-[#22C55E]' : delta < 0 ? 'text-[#EF4444]' : 'text-[#6B7280]';
+              const data = c.series.map((p) => ({
+                label: new Date(p.ts).toLocaleDateString(locale, { day: 'numeric', month: 'short' }),
+                weight: p.weight,
+              }));
+              return (
+                <div
+                  key={c.exerciseId}
+                  className="overflow-hidden rounded-3xl border border-[#222222] bg-[#111111] p-5"
+                >
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-[#6B7280]">
+                      {c.label}
+                    </span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-black tabular-nums tracking-tight text-white">
+                        {formatChartWeight(last)}
+                        {t('kgUnit')}
+                      </span>
+                      {delta !== 0 ? (
+                        <span className={`text-[11px] font-black tabular-nums ${tone}`}>
+                          {formatSignedKg(delta)}
+                          {t('kgUnit')}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <ProgressionChart data={data} />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

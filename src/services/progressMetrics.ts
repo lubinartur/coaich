@@ -48,6 +48,31 @@ export function bestEpley1RMInWindow(
   return bestAcrossSessions;
 }
 
+/**
+ * Per-session weight progression for one exercise: representative weight = max completed
+ * working-set weight (weight &gt; 0). Sessions without qualifying sets are skipped.
+ * Returns the most recent `limit` points sorted by date ascending.
+ */
+export function weightProgressionSeries(
+  sessions: WorkoutSession[],
+  exerciseId: string,
+  limit = 10,
+): { ts: number; weight: number }[] {
+  const cid = canonicalExerciseId(exerciseId);
+  const points: { ts: number; weight: number }[] = [];
+  for (const s of sessions) {
+    const ex = s.exercises.find((e) => canonicalExerciseId(e.exerciseId) === cid);
+    if (!ex) continue;
+    let maxW = 0;
+    for (const st of ex.sets) {
+      if (st.completed && st.weight > 0) maxW = Math.max(maxW, st.weight);
+    }
+    if (maxW > 0) points.push({ ts: sessionFinishedMs(s), weight: maxW });
+  }
+  points.sort((a, b) => a.ts - b.ts);
+  return points.slice(-limit);
+}
+
 /** Max Epley 1RM over any single completed set (lifetime PR estimate). */
 export function allTimeBestEpley1RM(sessions: WorkoutSession[], exerciseId: string): number {
   const cid = canonicalExerciseId(exerciseId);
