@@ -796,6 +796,12 @@ export default function LoggerScreen({
 
   const handleFinish = async () => {
     if (exercises.length === 0) return;
+    let sessionName = effectiveWorkoutName;
+    if (effectiveWorkoutType === 'custom') {
+      const fallback = lang === 'ru' ? 'Своя' : 'Custom';
+      const entered = window.prompt(lang === 'ru' ? 'Название тренировки' : 'Workout name', fallback);
+      sessionName = entered && entered.trim() ? entered.trim() : fallback;
+    }
     const id = crypto.randomUUID();
     const finishedAtMs = Date.now();
     const finishedAt = new Date(finishedAtMs).toISOString();
@@ -804,7 +810,7 @@ export default function LoggerScreen({
     const totalVolume = computeTotalVolume(exercises);
     const session: WorkoutSession = {
       id,
-      name: effectiveWorkoutName,
+      name: sessionName,
       type: toWorkoutType(effectiveWorkoutType),
       startedAt: sessionStartedAtIso ?? new Date(startMs).toISOString(),
       finishedAt,
