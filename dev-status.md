@@ -5,7 +5,7 @@ Originally exported from `coaich-memory` for project `coaich`, then manually ref
 ## Export Summary
 
 - Base memory export date: 2026-05-11
-- Manual refresh date: 2026-05-13
+- Manual refresh date: 2026-06-07
 - Project: `coaich`
 - Base memory entries: 6
 - Current branch state: V2 in progress, deployed to Vercel from `v1-redesign` (Production)
@@ -33,6 +33,29 @@ V1 is complete and live in production. The strongest product signals in the curr
 - Finishing localization edge cases (alerts, confirms, aria-labels, dynamic toasts) so no English copy leaks in RU mode.
 - Cleaning up provider/docs drift where older Gemini/template references still exist while Anthropic remains the live code path.
 - Scoping v2 candidates without expanding v1 surface area (see "Known limitations" below).
+
+### Recent change sequence (2026-06-07)
+
+V2 feature wave — all changes below verified against current source:
+
+1. **AI Coach chat (Today)** — `src/screens/Today/index.tsx` adds an "Ask Coach / Спросить тренера" ghost button under the Coach Intelligence card that opens a bottom-sheet chat. New `generateCoachChatReply(context, history)` in `src/services/coachService.ts` builds a trainer system prompt (profile, last session, today's recommendation, injuries) and sends the running conversation to `/api/anthropic`. Conversation history is kept in component state for follow-ups; user bubbles are accent-purple, coach bubbles are surface cards, with a three-dot loading indicator.
+2. **Quick action chips** — the chat sheet shows 6 chips. Injury-driven chips ("Болит плечо/Shoulder hurts", knees, back, elbows) are added conditionally from `profile.injuries`, followed by generic chips (why this workout, why this weight, replace exercise, make shorter, didn't sleep). Tapping a chip sends it immediately.
+3. **Recovery Score card (Today)** — `calculateRecoveryScore(profile)` in `coachService.ts` returns `{ score, label }` from a base of 50 adjusted by hours since last workout, last-session ratings, and weekly volume vs summed MAV (`VOLUME_TARGETS`). Card sits between the page title and Coach Intelligence: label + large score on the left, status pill on the right (green `ready` ≥75 / amber `moderate` 50–74 / red `low` <50).
+4. **Injury awareness in prompts** — `buildReviewPrompt` (`src/services/aiService.ts`), `buildCoachPrompt` and the chat system prompt (`coachService.ts`) all inject `INJURIES: ...` and rules to avoid increasing load on stressed areas / suggest alternatives on reported pain.
+5. **Structured Coach Intelligence card** — `buildCoachPrompt` now requests a `Reason:` / `Targets:` bullet format. Today parses it with `parseCoachSections()` (EN/RU headers) and renders bullets under small uppercase section labels (`coachReasonLabel` / `coachTargetsLabel`); free-form replies fall back to the legacy sentence renderer.
+6. **Real exercise targets in Coach card** — `CoachPromptData` gained `exerciseTargets`; Today loads stored targets from `db.exerciseTargets` for the recommended split and passes them to `buildCoachPromptData`, so the `Targets:` section uses actual `weight × reps × sets` (and is skipped when none exist).
+7. **Workout draft persistence (Logger)** — `src/screens/Logger/index.tsx` writes an active workout to `localStorage` key `coaich-workout-draft` on every change (exercises, start timestamps, started flag). On mount a non-stale draft (<12h) surfaces a restore banner ("Восстановить" / "Начать заново"); the draft is cleared on finish, on confirmed exit, and on "start fresh". Helpers live module-level (`readFreshWorkoutDraft`, `clearWorkoutDraft`).
+8. **Program day picker (Today)** — tapping a multi-day Quick Program opens a bottom-sheet listing all days, highlighting the engine-chosen `NEXT` day; single-day programs start immediately as before.
+9. **Custom workout card (Today)** — a dashed "Своя / Custom" card at the end of the Quick Programs grid opens the Logger with an empty template (`workoutType: 'custom'`, `exerciseTemplate: []`, picker opened on mount).
+10. **PR celebration banner (Logger)** — `checkIfPR(exerciseId, weight)` in `src/services/prDetection.ts` queries `db.workoutSessions` for the max completed weight; on a weight PR, Logger shows a gold/amber banner ("🏆 Личный рекорд! / Personal Record!") for 2.5s and the set checkmark gets a brief scale pop (`SortableExercise.tsx`). A per-session ref prevents re-triggering the same PR.
+11. **Exercise images (Logger)** — `src/services/exerciseGifService.ts` resolves demo images from the free, no-auth `yuhonas/free-exercise-db` dataset (cached in memory + `localStorage` key `coaich-gif-cache`). In `SortableExercise.tsx`, an expanded card lazily resolves an image; when found, a small `Image` icon button next to the name opens a fullscreen modal (no inline thumbnail). Note: the dataset serves static JPGs, not animated GIFs.
+12. **Split selection (Settings)** — `src/screens/Settings/index.tsx` exposes `SPLIT_OPTIONS = ['ppl', 'upper_lower', 'full_body']` writing `profile.splitType`; the coach recommendation rotation in `coachService.ts` respects the chosen split.
+13. **Upper/Lower preset program** — `PRESET_PROGRAMS` in `src/constants/workoutPrograms.ts` includes a 4-day `Upper/Lower` program (`Upper A`, `Lower A`, `Upper B`, `Lower B`) alongside `PPL` and `Full Body`.
+14. **Gap-based load reduction** — `getExerciseTarget` (`src/services/progressionEngine.ts`) now tiers the `gap_detected` path: gap 8–14d → −10% weight, 15–21d → −20%, >21d → −30% and reps reset to range min (rounded via `roundWeightByExerciseEquipment`). `getWorkoutRecommendation` also prepends a localized long-break note when days-since-last ≥ 8.
+15. **One-time seed** — `src/scripts/seedWorkout.ts` (`seedJune4Workout`) inserts a `manual-june4-lower-b` session, guarded by an existence check in `App.tsx` boot.
+16. **Delete individual sets (Logger)** — per-set `removeSet(exIdx, setIdx)` with a minus affordance (kept while >1 set).
+17. **Timestamp-based rest timer (Logger)** — rest is tracked via a wall-clock `restEndTime` with a 1s tick and `visibilitychange` re-sync, so a backgrounded PWA shows correct remaining time.
+18. **Accordion Logger** — single open exercise (`expandedExIdx`); completing all sets of an exercise auto-advances to the next incomplete one (`findNextIncompleteExIdx`).
 
 ### Recent change sequence (2026-05-13)
 
@@ -75,6 +98,47 @@ Earlier in this cycle (2026-05-12):
 - Dumbbell weights are not auto-doubled in volume math; users enter the total they intend to lift.
 - No cloud sync and no authentication; all data remains in browser-local Dexie/IndexedDB.
 - A nested `coaich/` subfolder exists in the repo root as a leftover nested clone artifact; it is harmless and not deployed.
+- Coach chat has no persistence — history lives only in component state and is lost when the sheet/screen unmounts.
+- Exercise demo media are static JPGs from `free-exercise-db` (not animated GIFs); matching is name-based, so exercises without a dataset match show no image, and RU exercise names rely on the EN canonical names for lookup.
+- `calculateRecoveryScore` and the `Targets:` coach section are heuristic: recovery uses summed-MAV ratios, and coach targets only render when stored `db.exerciseTargets` exist for the recommended split.
+- The `gap_detected` tiered reduction keys off the gap between the two most recent sessions for that exercise; the "current break to today" signal is surfaced separately in coach reasoning.
+- `seedJune4Workout` is a one-time data migration in the boot path and can be removed once obsolete.
+
+## Current State (verified 2026-06-07)
+
+Verified by reading the current source. Dexie schema is `coaich-db` at version 4 with 8 tables: `profile`, `exercises`, `workoutSessions`, `aiReviews`, `exerciseTargets`, `programs`, `prRecords`, `coachMemory`. `App.tsx` is the router-less state machine with 4 tabs (`today`, `progress`, `history`, `settings`) and 5 fullscreen overlays (`logger`, `rating`, `review`, `import`, `editWorkout`).
+
+### Screens (`src/screens/*`)
+
+- **Onboarding** — collects profile (goal, experience, environment, pharmacology, injuries, split, benchmark 10RMs); seeds initial `db.exerciseTargets` from benchmark lifts via `seedInitialTargetsFromProfile()`. Working.
+- **Today** — recommendation card (reads `db.exerciseTargets` first, falls back to `previewExerciseTarget`), accordion exercise previews, Recovery Score card, structured Coach Intelligence card (Reason/Targets) with real targets, Ask Coach chat sheet with injury-aware quick actions, Quick Programs grid with multi-day day-picker + Custom card. Working.
+- **Logger** — accordion exercise cards, per-set complete/edit, add/delete sets, drag-to-reorder (`@dnd-kit`), timestamp-based floating rest timer, exercise demo image button → fullscreen modal, PR celebration banner, localStorage draft persistence + restore banner. Working.
+- **Rating** — per-exercise good/okay/bad + notes; triggers AI review and fire-and-forget `generateCoachInsights`. Working.
+- **Review** — AI analysis (intro / went well / to improve / next targets / exercise notes), PRs, stats (kg), exercise log; regenerate-review button; back + Done footer. Working.
+- **History** — session list with localized delete (also removes linked `aiReviews`); `pb-24` clears the floating nav. Working.
+- **EditWorkout** — edit a saved session's exercises/sets and date (preserves time-of-day); fully localized confirms/placeholders. Working.
+- **Progress** — strength index, benchmark lifts with regression badges, weekly volume saturation; empty-state until first completed workout. Working.
+- **Settings** — profile/preferences editing, split selection (PPL / Upper-Lower / Full Body), injuries, language toggle (reload on change), JSON export/import backup. Working.
+- **Import** — manual entry of past workouts with localized labels/toasts, red trash row removal, local-date prefill. Working.
+
+### Services (`src/services/*`)
+
+- **`db.ts`** — Dexie database, schema/migrations (v1→v4), and seeders (`seedExercisesIfEmpty`, `seedProgramsIfEmpty`, `getProfile`, `hasProfile`).
+- **`progressionEngine.ts`** — deterministic targets and carry-over: `getExerciseTarget` / `previewExerciseTarget`, rep ranges by goal, weight rounding by equipment, baseline-from-calibration, deload logic (`checkDeloadNeeded` with frequency-scaled threshold), and tiered `gap_detected` load reduction. `canonicalExerciseId` normalization.
+- **`coachService.ts`** — `getWorkoutRecommendation` (rotation + recovery window + weekly balance + split type + long-break note), `buildCoachPromptData` / `buildCoachPrompt` / `generateCoachMessage`, `generateCoachChatReply`, `calculateRecoveryScore`.
+- **`aiService.ts`** — `buildReviewPrompt`, AI review generation with robust JSON unwrapping, and `generateCoachInsights` writing `coachMemory`.
+- **`prDetection.ts`** — strength-metric PR detection (`isSetPersonalRecord`), weight-only `checkIfPR`, and `buildPrRecordsForSession`.
+- **`progressMetrics.ts`** — Epley 1RM, rolling-window bests, overall strength score, benchmark lift defs, per-muscle working sets, weekly windows, percent change (powers Progress).
+- **`exerciseGifService.ts`** — resolves/caches exercise demo images from `free-exercise-db`.
+- **`dataExport.ts`** — `exportAllData` / `importAllData` for full local JSON backup/restore.
+
+### Key features that work
+
+- Closed training loop: Today → Logger → Rating → Review → saved targets → next workout loads them.
+- Deterministic progression with automatic target carry-over, deload weeks, and post-break load reduction.
+- AI layer: per-session review, coach recommendation copy, free-form coach chat, and cross-session coach memory — all via the Anthropic proxy (`api/anthropic.ts` in prod, Vite proxy in dev).
+- Recovery score, PR celebration, exercise demo images, draft crash-recovery.
+- Full EN/RU localization, JSON backup/restore, installable PWA, PWA-safe timers.
 
 ## V2 Changes
 
