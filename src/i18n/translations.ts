@@ -218,6 +218,8 @@ export const translations = {
     recoveryReady: 'Ready to progress',
     recoveryModerate: 'Train without failure',
     recoveryLow: 'Rest needed',
+    coachReasonLabel: 'REASON',
+    coachTargetsLabel: 'TARGETS',
   },
   ru: {
     today: 'Сегодня',
@@ -438,6 +440,8 @@ export const translations = {
     recoveryReady: 'Готов к прогрессии',
     recoveryModerate: 'Тренировка без отказа',
     recoveryLow: 'Нужен отдых',
+    coachReasonLabel: 'ПРИЧИНА',
+    coachTargetsLabel: 'ЦЕЛИ',
   },
 } as const;
 

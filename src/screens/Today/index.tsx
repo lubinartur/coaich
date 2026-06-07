@@ -94,6 +94,44 @@ function missionDateSubtitle(locale: string): string {
   return new Date().toLocaleDateString(locale, { month: 'long', day: 'numeric' });
 }
 
+type CoachSections = { reasons: string[]; targets: string[] };
+
+const COACH_REASON_HEADER = /^(reasons?|причин[аы]|обоснование)\s*:?\s*$/i;
+const COACH_TARGETS_HEADER = /^(targets?|цел[иь]|целевые)\s*:?\s*$/i;
+
+/**
+ * Parse the structured coach response ("Reason:" / "Targets:" sections with bullet lines)
+ * into grouped bullet arrays. Returns `null` for free-form text so callers can fall back
+ * to the legacy sentence rendering.
+ */
+function parseCoachSections(text: string): CoachSections | null {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const reasons: string[] = [];
+  const targets: string[] = [];
+  let section: 'reason' | 'target' | null = null;
+
+  for (const line of lines) {
+    if (COACH_REASON_HEADER.test(line)) {
+      section = 'reason';
+      continue;
+    }
+    if (COACH_TARGETS_HEADER.test(line)) {
+      section = 'target';
+      continue;
+    }
+    const bullet = line.replace(/^[-•*]\s*/, '').trim();
+    if (!bullet || bullet.startsWith('(')) continue;
+    if (section === 'reason') reasons.push(bullet);
+    else if (section === 'target') targets.push(bullet);
+  }
+
+  if (reasons.length === 0 && targets.length === 0) return null;
+  return { reasons, targets };
+}
+
 /** Split coach copy on ". " so each sentence can be spaced; preserves final segment without forcing a period. */
 function splitCoachMessageIntoSentences(text: string): string[] {
   const t = text.trim();
@@ -441,6 +479,8 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
         : { accent: '#F59E0B', text: t('recoveryModerate'), pillClass: 'border-[#F59E0B]/40 bg-[#F59E0B]/15 text-[#F59E0B]' }
     : null;
 
+  const coachSections = coachAiMessage ? parseCoachSections(coachAiMessage) : null;
+
   const injuries = profile?.injuries ?? [];
   const injuryChips: string[] = [];
   if (injuries.includes('shoulders')) injuryChips.push(t('qaShoulderHurts'));
@@ -551,6 +591,43 @@ export default function TodayScreen({ onStartWorkout }: TodayScreenProps) {
             <div className="h-4 w-full animate-pulse rounded-md bg-[#2A2A2A]" />
             <div className="h-4 w-[92%] animate-pulse rounded-md bg-[#2A2A2A]" />
             <div className="h-4 w-[70%] animate-pulse rounded-md bg-[#2A2A2A]" />
+          </div>
+        ) : coachAiMessage && coachSections ? (
+          <div className="relative z-10 space-y-5">
+            {coachSections.reasons.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8B5CF6]">
+                  {t('coachReasonLabel')}
+                </p>
+                <ul className="space-y-1.5">
+                  {coachSections.reasons.map((reason, i) => (
+                    <li key={i} className="flex gap-2 text-base font-medium leading-relaxed text-white/90">
+                      <span className="text-[#8B5CF6]" aria-hidden>
+                        •
+                      </span>
+                      <span className="min-w-0">{reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {coachSections.targets.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8B5CF6]">
+                  {t('coachTargetsLabel')}
+                </p>
+                <ul className="space-y-1.5">
+                  {coachSections.targets.map((target, i) => (
+                    <li key={i} className="flex gap-2 text-base font-medium leading-relaxed text-white/90">
+                      <span className="text-[#8B5CF6]" aria-hidden>
+                        •
+                      </span>
+                      <span className="min-w-0">{target}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : coachAiMessage ? (
           <>

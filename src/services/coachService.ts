@@ -84,19 +84,20 @@ ${data.memoryFindings.map((f) => `- ${f}`).join('\n')}
   : ''}
 ---
 
-Write ONE short paragraph (2 sentences) explaining why this workout is recommended today.
+Respond in this exact format (no markdown, plain text):
 
-Mention recovery time or volume balance if relevant.
+Reason:
+- [one short reason - recovery/volume/rotation]
+- [one short reason - muscle group status]
 
-If athlete has injuries, mention relevant modifications in your recommendation.
+Targets:
+- [Exercise name]: [weight]×[reps]×[sets]
+- [Exercise name]: [weight]×[reps]×[sets]
+(show max 3 key exercises from the recommendation)
 
-Highlight the workout name in your response.
-
+Keep each bullet under 10 words. No fluff. Be direct.
+If athlete has injuries, reflect relevant modifications in the reasons.
 Language: ${data.profile.language === 'ru' ? 'Russian' : 'English'}
-
-Respond with plain text only, no JSON.
-
-Do not use markdown formatting. No bold (**text**), no asterisks, plain text only.
 
 `;
 
